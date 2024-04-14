@@ -1,6 +1,6 @@
 from scapy.all import sniff
 from scapy.layers.inet import IP
-import netifaces
+
 
 radio_ip = ""
 
