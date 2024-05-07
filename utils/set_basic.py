@@ -73,11 +73,16 @@ def set_single(radio_ip, f, bw, net_id, power):
 
     return response.text
 
+def broadcast_net_stat(radio_ip,nodelist):
+    url = f'http://{radio_ip}/bcast_enc.py'
+    payload = f''
 
 def send_broadcast(radio_ip, f, bw, net_id, power, nodelist):
     # url = "http://172.20.241.202/bcast_enc.py"
 
     url = f'http://{radio_ip}/bcast_enc.py'
+    payload = f'{"apis":[{"method": "net_status"}],"nodeids":{nodelist}}'
+
     nw_name_value = net_id  # Variable you want to insert
     power_value = power  # Another variable
     freq_value = f
