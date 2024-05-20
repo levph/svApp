@@ -1,11 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 import asyncio
-from datetime import datetime
-from models import PTTGroup, Setting, BasicSettings, NewLabel
+from utils.fa_models import BasicSettings, NewLabel
 from utils import set_basic
 from utils.get_radio_ip import sniff_target_ip
-from utils.net_battery_percent import get_batteries, node_labels, save_node_label, list_devices, get_version, net_status
+from utils.net_battery_percent import get_batteries, list_devices, net_status
 from utils.change_label import change_label
+from utils.get_cameras import camera_finder
 
 app = FastAPI()
 
@@ -25,13 +25,32 @@ async def startup_event():
     :return:
     """
     global RADIO_IP, NODE_LIST, IP_LIST
-    RADIO_IP = sniff_target_ip()
-    [IP_LIST, NODE_LIST, _] = list_devices(RADIO_IP)
-    print(f"Radio IP set to {RADIO_IP}")
-    print(f"Node List set to {NODE_LIST}")
-    print(f"IP List set to {IP_LIST}")
+
+    try:
+        RADIO_IP = sniff_target_ip()
+    except Exception as e:
+        # If we got an error then most likely there's no connected Radio
+        # TODO: use exception to tell user how to fix it
+        print(f"Can't find connected device")
+        print(e)
+    else:
+        if not RADIO_IP:
+            print(f"No Radio connected.")
+            return
+        # if we found a device
+
+        # get list of devices in network
+        print(f"Radio IP set to {RADIO_IP}")
+        try:
+            [IP_LIST, NODE_LIST, _] = list_devices(RADIO_IP)
+        except Exception as e:
+            print(f"Error. Please make sure computer IP is correct")
+        else:
+            print(f"Node List set to {NODE_LIST}")
+            print(f"IP List set to {IP_LIST}")
 
 
+# TODO: test new changes with devices
 async def update_vars():
     """
     routine function to update global variables
@@ -40,14 +59,24 @@ async def update_vars():
     :return:
     """
     global RADIO_IP, NODE_LIST, IP_LIST
-    # TODO: less resource affecting method for finding current radio IP
-    #  (no need to always sniff packets, maybe just API request)
-    RADIO_IP = sniff_target_ip()
-    [IP_LIST, NODE_LIST, _] = list_devices(RADIO_IP)
-    print(f"Radio IP set to {RADIO_IP}")
-    print(f"Node List set to {NODE_LIST}")
-    print(f"IP List set to {IP_LIST}")
-    return f"{RADIO_IP} still connected"
+    valid = 1
+    RADIO_IP = RADIO_IP if RADIO_IP else sniff_target_ip()
+    try:
+        [IP_LIST, NODE_LIST, _] = list_devices(RADIO_IP)
+    except Exception as e:
+        print(e)
+        RADIO_IP, NODE_LIST, IP_LIST = [], [], []
+        print(f"Searching for new connected device...")
+        await startup_event()
+        valid = 1 if RADIO_IP else 0
+    else:
+        print(f"Radio IP set to {RADIO_IP}")
+        print(f"Node List set to {NODE_LIST}")
+        print(f"IP List set to {IP_LIST}")
+
+    msg = f"{RADIO_IP} is connected" if valid else f"No Radio is connected"
+
+    return msg
 
 
 # TODO: finish the net stat function to get all snrs effectively
@@ -95,11 +124,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Create tasks for different message frequencies
         task1 = asyncio.create_task(send_messages(websocket, 20, get_battery))
-        # task2 = asyncio.create_task(send_messages(websocket, 20, get_battery))
+        task2 = asyncio.create_task(send_messages(websocket, 2, net_stat))
         task3 = asyncio.create_task(send_messages(websocket, 10, update_vars))
 
         # Wait for both tasks to complete (they won't, unless there's an error)
-        await asyncio.gather(task1, task3)
+        await asyncio.gather(task1, task2, task3)
 
     except WebSocketDisconnect:
         print("Client disconnected")
@@ -139,6 +168,24 @@ async def set_label(new_label: NewLabel):
         # msg = ["Success" if res else "Failed"]
         msg = "Success"
         return {"message": msg, "data": new_label.dict()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/get_camera")
+async def get_camera():
+    # TODO: test camera_finder with cameras (conenct different devices, interfaces etc...)
+    # TODO: add substreams and audio streams
+    """
+    This endpoint will return the stream URLs of existing cameras in network
+    existing URLs include main-stream, sub-stream and audio-stream
+    :return:
+    """
+    try:
+        streams = camera_finder()
+        # msg = ["Success" if res else "Failed"]
+        msg = "Success"
+        return {"message": msg, "data": streams}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

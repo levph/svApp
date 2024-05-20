@@ -1,40 +1,44 @@
-from scapy.all import sniff
-from scapy.layers.inet import IP
+"""
+This script is sniffing for the silvus discovery message.
+finds the IP of the connected radio.
+
+author: lev
+"""
+
+from scapy.all import *
+
+# Define the MAC prefix and IP range
+radio_ip = None
+mac_prefix = "c4:7c:8d"
+ip_range = "172."
+broadcast_mac = "ff:ff:ff:ff:ff:ff"
 
 
-radio_ip = ""
-
-
-def get_active_lan_interface():
-    """
-    Returns the name of the active LAN interface, excluding loopback and Wi-Fi.
-    It checks for the presence of an IPv4 address that falls within typical LAN
-    address ranges and is not a link-local address.
-
-    :return: Name of the active LAN interface or None if not found.
-    """
-    return 'en5'
-    # ... TBD ...
-
-
-def stop_filter(x):
+def packet_callback(packet):
     """
     The packet processing callback for sniff.
-     If packet is a broadcast to 172.20.255.255 coming from an address in same subnet,
-     store source IP as IP of Silvus connected to tablet, and stop sniffing.
+    Looking for Silvus discovery message
+    From what we've seen it's UDP message, MAC Broadcast
+    and source is expected to start with the silvus IP and MAC prefixes defined as global variables
+    will stop sniffing once conditions are met.
 
     :param x: The packet received by sniff.
     :return: True if the packet is the one we're looking for, False otherwise.
     """
     global radio_ip
-    src_ip = x[IP].src
-    dst_ip = x[IP].dst
+    if packet.haslayer(Ether) and packet.haslayer(IP) and packet.haslayer(UDP):
+        src_mac = packet[Ether].src
+        dst_mac = packet[Ether].dst
+        src_ip = packet[IP].src
 
-    if dst_ip == '172.20.255.255' and src_ip.startswith('172.20'):
-        radio_ip = src_ip
-        return True
-    else:
-        return False
+        # Check if the packet is a broadcast
+        if dst_mac.lower() == broadcast_mac:
+            # Check if the source MAC address matches the prefix and the IP is in the expected range
+            if src_mac.lower().startswith(mac_prefix) and src_ip.startswith(ip_range):
+                print(f"Received Silvus discovery message from {src_ip}")
+                radio_ip = src_ip
+                return True
+    return False
 
 
 def sniff_target_ip():
@@ -42,10 +46,11 @@ def sniff_target_ip():
     Sniffs the network for a target packet and returns the source IP address
     when the packet is found.
     """
-    active_lan_interface = get_active_lan_interface()
-    if not active_lan_interface:
-        raise ValueError("No active LAN interface found.")
-    # The sniff function now returns the IP address from the packet_handler
-    sniff(iface='en5', stop_filter=stop_filter, filter="ip", store=0)
+    # Start sniffing on all interfaces
+    sniff(stop_filter=packet_callback, store=0)
+
+    print(f"\nRadio IP is {radio_ip}")
     return radio_ip
 
+
+sniff_target_ip()

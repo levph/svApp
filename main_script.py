@@ -1,14 +1,10 @@
 import os
 
-from utils.get_radio_ip import sniff_target_ip
-from utils.net_battery_percent import get_batteries, node_labels, save_node_label, list_devices, get_version, net_status
+from utils.obs.get_radio_ip import sniff_target_ip
+from utils.net_battery_percent import get_batteries, node_labels, save_node_label, list_devices, net_status
 from utils.list_cameras import find_cameras
-from utils.set_basic import set_basic_settings
-from models import BasicSettings
+from utils.fa_models import BasicSettings
 from utils.change_label import change_label
-import webbrowser
-import tkinter as tk
-from tkinter import filedialog
 
 
 def open_url_if_agreed(ip):

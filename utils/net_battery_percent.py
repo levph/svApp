@@ -10,8 +10,15 @@ def send_command_ip(method, ip, params=None):
         "id": "1"
     }
     api_endpoint_tmp = f'http://{ip}/streamscape_api'
-    response = requests.post(api_endpoint_tmp, json=payload)
-    return response.json()
+
+    try:
+        response = requests.post(api_endpoint_tmp, json=payload, timeout=10)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        return response.json()  # Return the content if successful
+    except requests.exceptions.Timeout:
+        raise TimeoutError("The request timed out")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"An error occurred: {e}")
 
 
 def id_2_ip(id_list):

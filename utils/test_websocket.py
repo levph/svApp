@@ -4,6 +4,7 @@ import time
 
 
 async def test_websocket():
+
     uri = "ws://localhost:8000/ws"
     async with websockets.connect(uri) as websocket:
         start_time = time.time()
