@@ -10,15 +10,8 @@ def send_command_ip(method, ip, params=None):
         "id": "1"
     }
     api_endpoint_tmp = f'http://{ip}/streamscape_api'
-
-    try:
-        response = requests.post(api_endpoint_tmp, json=payload, timeout=10)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        return response.json()  # Return the content if successful
-    except requests.exceptions.Timeout:
-        raise TimeoutError("The request timed out")
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"An error occurred: {e}")
+    response = requests.post(api_endpoint_tmp, json=payload)
+    return response.json()
 
 
 def id_2_ip(id_list):
@@ -56,7 +49,7 @@ def net_status(radio_ip, nodelist):
     :param s_ip:
     :return:
     """
-    url = f'http://{radio_ip}/bcast_enc.pyc'
+    url = f'http://{radio_ip}/bcast_enc.py'
 
     payload = f'{{"apis":[{{"method":"network_status","params":{{}}}}],"nodeids":{nodelist}}}'
 
@@ -70,14 +63,14 @@ def net_status(radio_ip, nodelist):
     snr_report = json.loads(response.text)
 
     # Extracting unique [id, id, value] tuples from the result arrays
-    snr_tuples = set((tuple(sorted([result[i], result[i + 1]])), result[i + 2])
-                     for sublist in snr_report
-                     for entry in sublist
-                     for result in [entry['result']]
-                     for i in range(0, len(result), 3))
+    unique_tuples = set((result[i], result[i + 1], result[i + 2])
+                        for sublist in snr_report
+                        for entry in sublist
+                        for result in [entry['result']]
+                        for i in range(0, len(result), 3))
 
     # Converting tuples back to lists
-    result = [list(t) for t in snr_tuples]
+    result = [list(t) for t in unique_tuples]
 
     return result
 

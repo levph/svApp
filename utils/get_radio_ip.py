@@ -26,6 +26,7 @@ def packet_callback(packet):
     :return: True if the packet is the one we're looking for, False otherwise.
     """
     global radio_ip
+    print(f"checking packet, UDP:{packet.haslayer(UDP)}")
     if packet.haslayer(Ether) and packet.haslayer(IP) and packet.haslayer(UDP):
         src_mac = packet[Ether].src
         dst_mac = packet[Ether].dst
@@ -47,10 +48,8 @@ def sniff_target_ip():
     when the packet is found.
     """
     # Start sniffing on all interfaces
-    sniff(stop_filter=packet_callback, store=0)
+    sniff(stop_filter=packet_callback, store=0, timeout=10)
 
     print(f"\nRadio IP is {radio_ip}")
     return radio_ip
 
-
-sniff_target_ip()

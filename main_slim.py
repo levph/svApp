@@ -3,10 +3,7 @@ import asyncio
 from utils.fa_models import BasicSettings, NewLabel
 from utils import set_basic
 from utils.get_radio_ip import sniff_target_ip
-from utils.net_battery_percent import get_batteries
-from utils.api_funcs_ss5 import list_devices, net_status
-from utils.change_label import change_label
-from utils.get_cameras import camera_finder
+from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries
 
 app = FastAPI()
 
@@ -17,6 +14,7 @@ RADIO_IP = None
 NODE_LIST = None
 IP_LIST = None
 VERSION = None
+CAM_DATA = None
 
 
 @app.on_event("startup")
@@ -52,6 +50,31 @@ async def startup_event():
             print(f"IP List set to {IP_LIST}\n")
 
 
+@app.get("/net_data")
+async def net_data():
+    """
+    This method returns global variables
+    :return:
+    """
+    msg = {
+        "radio_ip": RADIO_IP,
+        "node_ids": NODE_LIST,
+        "node_ips": IP_LIST
+    }
+    return msg
+
+
+@app.get("/get_snrs")
+async def net_stat():
+    """
+    This method will return parameters of network i.e. SNRs between each node
+    :return:
+    """
+    global RADIO_IP, NODE_LIST
+    res = net_status(RADIO_IP, NODE_LIST)
+    return res
+
+
 # TODO: test new changes with devices
 async def update_vars():
     """
@@ -81,17 +104,7 @@ async def update_vars():
     return msg
 
 
-# TODO: finish the net stat function to get all snrs effectively
-async def net_stat():
-    """
-    This method will return parameters of network i.e. SNRs between each node
-    :return:
-    """
-    global RADIO_IP, NODE_LIST
-    res = net_status(RADIO_IP, NODE_LIST)
-    return res
-
-
+@app.get("/get_battery")
 async def get_battery():
     """
     routine method to return battery percentage of each device in the network
@@ -126,11 +139,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Create tasks for different message frequencies
         task1 = asyncio.create_task(send_messages(websocket, 20, get_battery))
-        task2 = asyncio.create_task(send_messages(websocket, 2, net_stat))
-        task3 = asyncio.create_task(send_messages(websocket, 10, update_vars))
+        task2 = asyncio.create_task(send_messages(websocket, 10, update_vars))
 
         # Wait for both tasks to complete (they won't, unless there's an error)
-        await asyncio.gather(task1, task3)
+        await asyncio.gather(task1, task2)
 
     except WebSocketDisconnect:
         print("Client disconnected")
@@ -156,35 +168,18 @@ async def set_basic_settings(settings: BasicSettings):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# TODO: check if request was successful
-@app.post("/change_label")
-async def set_label(new_label: NewLabel):
-    """
-    Set UI label for a given radio node_id
-    :param new_label:
-    :return:
-    """
-    try:
-        global RADIO_IP
-        res = change_label(RADIO_IP, new_label.node_id, new_label.label)
-        # msg = ["Success" if res else "Failed"]
-        msg = "Success"
-        return {"message": msg, "data": new_label.dict()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/get_camera")
+@app.get("/get_camera_links")
 async def get_camera():
-    # TODO: test camera_finder with cameras (conenct different devices, interfaces etc...)
+    # TODO: test camera_finder with cameras (connect different devices, interfaces etc...)
     # TODO: add substreams and audio streams
     """
     This endpoint will return the stream URLs of existing cameras in network
     existing URLs include main-stream, sub-stream and audio-stream
     :return:
     """
+    global IP_LIST
     try:
-        streams = camera_finder()
+        streams = find_camera_streams_temp(IP_LIST)
         # msg = ["Success" if res else "Failed"]
         msg = "Success"
         return {"message": msg, "data": streams}
