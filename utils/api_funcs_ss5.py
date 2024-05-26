@@ -16,70 +16,19 @@ functions to start:
 import requests
 import json
 import socket
-from onvif import ONVIFCamera, exceptions
-from zeep.transports import Transport
-from onvif.client import zeep
-from urllib.parse import urlparse
 
+import utils.send_commands
 
-def send_command_all(radio_ip, nodelist, method, params=None):
-    url = f'http://{radio_ip}/bcast_enc.pyc'
-
-    payload = f'{{"apis":[{{"method":"","params":{{}}}}],"nodeids":{nodelist}}}'
-
-    headers = {
-        'Accept': '*/*',
-        'Content-Type': 'text/plain',
-        'X-Requested-With': 'XMLHttpRequest'
-    }
-
-    response = requests.request("POST", url, headers=headers, data=payload)
-    data = json.loads(response.text)
-    return data
-
-
-def send_command_ip(method, ip, params=None):
-    payload = {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params or [],
-        "id": "1"
-    }
-    api_endpoint = f'http://{ip}/streamscape_api'
-    # TODO: add error handling as explain in API manual
-    try:
-        response = requests.post(api_endpoint, json=payload, timeout=10)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        return response.json()['result']  # Return the content if successful
-    except requests.exceptions.Timeout:
-        raise TimeoutError("The request timed out")
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"An error occurred: {e}")
+from utils.send_commands import send_commands_ip
 
 
 def get_rssi_report(ip):
     # enable rssi report
-    res = send_command_ip(method="rssi_report_address", ip=ip, params=["172.20.2.1", "30000"])
+    res = send_commands_ip(methods=["rssi_report_address"], radio_ip=ip, params=[["172.20.2.1", "30000"]])
 
     # set rssi report timing
-    res2 = send_command_ip(method="rssi_report_period", ip=ip, params=["500"])
+    res2 = send_commands_ip(methods=["rssi_report_period"], radio_ip=ip, params=[["500"]])
     lev = 1
-
-    def parse_rssi_report(data):
-        # Assuming data is a JSON string
-        report = json.loads(data)
-        return report
-
-    def start_rssi_listener(ip, port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind((ip, port))
-
-        while True:
-            data, addr = sock.recvfrom(1024)
-            snr_values = parse_rssi_report(data)
-            print(f"Received SNR values: {snr_values}")
-
-    start_rssi_listener("172.20.2.1", 30000)
 
 
 def node_id_to_ip(nodelist):
@@ -125,7 +74,7 @@ def node_id_to_ip(nodelist):
 
 
 def list_devices(s_ip):
-    node_ids = send_command_ip("routing_tree", ip=s_ip)
+    node_ids = send_commands_ip(["routing_tree"], radio_ip=s_ip, params=[[]])
 
     # translate ids of all the nodes to ip
     ips = node_id_to_ip(node_ids)
@@ -146,7 +95,7 @@ def find_camera_streams_temp(iplist):
 
     # find connected devices in each node
     for iip in iplist:
-        devices = send_command_ip("read_client_list", ip=iip)
+        devices = send_commands_ip(["read_client_list"], radio_ip=iip, params=[[]])
         filtered_devices = [device for device in devices if not device['mac'].startswith('c4:7c:8d')]
         for device in filtered_devices:
             ip = device['ip']
@@ -289,6 +238,7 @@ def find_camera_streams_temp(iplist):
 def net_status(radio_ip, nodelist):
     """
     return devices in network and SNR between them
+    :param nodelist:
     :param radio_ip:
     :param s_ip:
     :return:
@@ -325,23 +275,92 @@ def get_batteries(ips):
     percents = []
 
     for radio_ip in ips:
-        battery_percentage = send_command_ip("battery_percent", radio_ip)
+        battery_percentage = send_commands_ip(["battery_percent"], radio_ip=radio_ip, params=[[]])
         print(f'Radio IP: {radio_ip}, Battery: {battery_percentage[0]}')
         percents.append(battery_percentage[0])
 
-    result = [{"ip": ip, "%": percent} for ip, percent in zip(ips, percents)]
+    result = [{"ip": ip, "percent": percent} for ip, percent in zip(ips, percents)]
     return result
 
 
-def test_routing_tree():
-    ip = "172.20.238.213"
-    ip2 = "172.20.241.202"
-    route_tree = send_command_ip("routing_tree", ip=ip)
+def set_ptt_groups(ips, num_groups, statuses):
+    """
+    This method sets ptt group settings for all radios
+    :param ips: ips of radios to change group settings
+    :param num_groups: amount of groups to set
+    :param statuses: statuses of each group
+    :return:
+    """
+    group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
 
-    connected_devices = send_command_ip("read_client_list", ip=ip2)
+    # methods = ["ptt_mcast_group"] * len(group_ips)
 
-    net_stat = send_command_ip("network_status", ip=ip)
-    print(net_stat)
+    # set groups for all radios
+    for ip in ips:
+        methods = ["ptt_mcast_group"] * len(group_ips)
+        res = send_commands_ip(methods=methods, radio_ip=ip, params=group_ips)
+        # for g in group_ips:
+        #     res = send_commands_ip(["ptt_mcast_group"], ip=ip, params=g)
 
-    # rssi_report = get_rssi_report(ip)
+    ptt_settings = []
+
+    # set status strings for each, including reset! (making other groups inactive)
+    for status in statuses:
+        # classify each group
+        listen = []
+        talk = []
+        monitor = []
+        for ii, g in enumerate(status):
+            if g == 1:
+                listen.append(str(ii))
+                talk.append(str(ii))
+            elif g == 2:
+                listen.append(str(ii))
+                monitor.append(str(ii))
+
+        listen = ','.join(listen)
+        talk = ','.join(talk)
+        monitor = ','.join(monitor)
+
+        arr = [listen, talk, monitor] if monitor else [listen, talk]
+
+        ptt_str = '_'.join(arr)
+        ptt_settings.append([ptt_str])
+
+    for ii in range(len(ips)):
+        res = send_commands_ip(["ptt_active_mcast_group"], radio_ip=ips[ii], params=[ptt_settings[ii]])
+
+    return "Success maybe"
+
+
+def get_basic_set(radio_ip):
+    """
+    get current settings of frequency, bandwidth, net_id and power of current device
+    :param radio_ip:
+    :return:
+    """
+    methods = ["freq", "bw", "power_dBm", "nw_name"]
+    params = [[]] * 4
+
+    res = send_commands_ip(methods, radio_ip, params)
+
+    res = {
+        "set_net_flag": [],
+        "frequency": float(res[0][0]),
+        "bw": float(res[1][0]),
+        "net_id": res[3][0],
+        "power_dBm": float(res[2][0])
+    }
+
+    return res
+
+# def test_routing_tree():
+#     ip = "172.20.238.213"
+#     ip2 = "172.20.241.202"
+#     route_tree = send_commands_ip("routing_tree", ip=ip)
+#
+#     connected_devices = send_commands_ip("read_client_list", ip=ip2)
+#
+#     net_stat = send_commands_ip("network_status", ip=ip)
+#     print(net_stat)
 

@@ -1,9 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 import asyncio
-from utils.fa_models import BasicSettings, NewLabel
+from typing import Optional
+from utils.fa_models import BasicSettings, NewLabel, PttData, RadioIP
 from utils import set_basic
 from utils.get_radio_ip import sniff_target_ip
-from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries
+from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
+    get_basic_set
 
 app = FastAPI()
 
@@ -50,7 +52,36 @@ async def startup_event():
             print(f"IP List set to {IP_LIST}\n")
 
 
-@app.get("/net_data")
+@app.post("/set-radio-ip")
+async def set_radio_ip(ip: RadioIP):
+    """
+    set radio ip
+    :param ip:
+    :return:
+    """
+    global RADIO_IP, NODE_LIST, IP_LIST
+    try:
+        RADIO_IP = ip.radio_ip
+
+        # get list of devices in network
+        print(f"Radio IP set to {RADIO_IP}\n")
+        try:
+            [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+        except Exception as e:
+            print(f"Error. Please make sure computer IP is correct")
+            print(e)
+            msg = {"Error. Please make sure computer IP is correct"}
+        else:
+            print(f"Node List set to {NODE_LIST}")
+            print(f"IP List set to {IP_LIST}\n")
+            msg = {"radio_ip": RADIO_IP, "node_list": NODE_LIST, "node_ip_list": IP_LIST}
+
+        return msg
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/net-data")
 async def net_data():
     """
     This method returns global variables
@@ -64,7 +95,25 @@ async def net_data():
     return msg
 
 
-@app.get("/get_snrs")
+@app.post("/basic-settings")
+async def basic_settings(settings: Optional[BasicSettings]=None):
+    """
+    :return:
+    """
+    try:
+        if settings:
+            response = set_basic.set_basic_settings(RADIO_IP, NODE_LIST, settings)
+            msg = {"Error"} if "error" in response else {"Success"}
+
+            return msg
+        else:
+            response = get_basic_set(RADIO_IP)
+            return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/get-snrs")
 async def net_stat():
     """
     This method will return parameters of network i.e. SNRs between each node
@@ -104,7 +153,7 @@ async def update_vars():
     return msg
 
 
-@app.get("/get_battery")
+@app.get("/get-battery")
 async def get_battery():
     """
     routine method to return battery percentage of each device in the network
@@ -139,10 +188,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Create tasks for different message frequencies
         task1 = asyncio.create_task(send_messages(websocket, 20, get_battery))
-        task2 = asyncio.create_task(send_messages(websocket, 10, update_vars))
+        task2 = asyncio.create_task(send_messages(websocket, 9, update_vars))
+        task3 = asyncio.create_task(send_messages(websocket, 10, net_stat))
 
         # Wait for both tasks to complete (they won't, unless there's an error)
-        await asyncio.gather(task1, task2)
+        await asyncio.gather(task1, task2, task3)
 
     except WebSocketDisconnect:
         print("Client disconnected")
@@ -152,23 +202,17 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
 
 
-# TODO: set link distance to 5000 too!
-@app.post("/set_basic_settings")
-async def set_basic_settings(settings: BasicSettings):
-    """
-    this method applies basic settings (frequency, power, bandwidth, netID)
-    :param settings:
-    :return:
-    """
+@app.post("/set-ptt-groups")
+async def set_ptt_group(ptt_data: PttData):
     try:
-        response = set_basic.set_basic_settings(RADIO_IP, NODE_LIST, settings)
+        response = set_ptt_groups(ptt_data.ips, ptt_data.num_groups, ptt_data.statuses)
         # TODO: check that response was positive
-        return {"message": "Basic Settings set successfully", "data": settings.dict()}
+        return {"message": "ptt group settings set succesfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/get_camera_links")
+@app.get("/get-camera-links")
 async def get_camera():
     # TODO: test camera_finder with cameras (connect different devices, interfaces etc...)
     # TODO: add substreams and audio streams

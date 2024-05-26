@@ -26,12 +26,10 @@ def packet_callback(packet):
     :return: True if the packet is the one we're looking for, False otherwise.
     """
     global radio_ip
-    print(f"checking packet, UDP:{packet.haslayer(UDP)}")
     if packet.haslayer(Ether) and packet.haslayer(IP) and packet.haslayer(UDP):
         src_mac = packet[Ether].src
         dst_mac = packet[Ether].dst
         src_ip = packet[IP].src
-
         # Check if the packet is a broadcast
         if dst_mac.lower() == broadcast_mac:
             # Check if the source MAC address matches the prefix and the IP is in the expected range
@@ -53,3 +51,4 @@ def sniff_target_ip():
     print(f"\nRadio IP is {radio_ip}")
     return radio_ip
 
+# sniff_target_ip()

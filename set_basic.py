@@ -104,7 +104,7 @@ def send_broadcast(radio_ip, f, bw, net_id, power, nodelist):
 
 
 def set_basic_settings(radio_ip, nodelist, settings):
-    set_net = settings.setNetFlag
+    set_net = settings.set_net_flag
     f = str(settings.frequency)
     bw = str(settings.bw)
     net_id = str(settings.netID)

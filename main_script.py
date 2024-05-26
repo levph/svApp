@@ -38,7 +38,7 @@ def main():
         result = get_batteries(ips)
         print("saving")
         settings = BasicSettings
-        settings.setNetFlag = 0
+        settings.set_net_flag = 0
         settings.netID = "yosi"
         settings.frequency = "2490"
         settings.bw = "5"

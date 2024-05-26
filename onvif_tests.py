@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import cv2
 # import vlc
 import time
-
+lev=1
 
 def perform_ptz(camera, move, timeout=1):
     """
