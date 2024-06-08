@@ -1,17 +1,38 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional
-from utils.fa_models import BasicSettings, NewLabel, PttData, RadioIP
+from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials
 from utils import set_basic
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
     get_basic_set
+import json
 
 app = FastAPI()
 
+origins = [
+    "http://localhost",
+    "http://localhost:5173"
+]
+
+app.add_middleware(CORSMiddleware,
+                   allow_origins=origins,
+                   allow_credentials=True,
+                   allow_methods=["*"],
+                   allow_headers=["*"])
+# TODO:
+"""
+ check encrypted/log-in protected devices - 
+ can you access protected devices when passwords are different?
+ or just change all function bcast calls who use other IP api?
+ how does encryption affect it?
+ Refer to "Password protected API" part in manual
+ 
+ Solve network mapping for radio discovery, better ONVIF discovery, 
+ RSSI reports (less latency for SNR), voice recording...
+"""
 # global variables
-# TODO: check if function calls were successful
-# TODO: add documentation :))
 RADIO_IP = None
 NODE_LIST = None
 IP_LIST = None
@@ -19,6 +40,7 @@ VERSION = None
 CAM_DATA = None
 
 
+# TODO: fix with new version (in mail haha)
 @app.on_event("startup")
 async def startup_event():
     """
@@ -52,6 +74,15 @@ async def startup_event():
             print(f"IP List set to {IP_LIST}\n")
 
 
+@app.post("/log-in")
+async def log_in(credentials: Credentials):
+    """
+    Future method to allow log in for locked devices
+    :param credentials:
+    :return:
+    """
+
+
 @app.post("/set-radio-ip")
 async def set_radio_ip(ip: RadioIP):
     """
@@ -66,6 +97,7 @@ async def set_radio_ip(ip: RadioIP):
         # get list of devices in network
         print(f"Radio IP set to {RADIO_IP}\n")
         try:
+            # run an api call to make sure IP was inserted correctly
             [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
         except Exception as e:
             print(f"Error. Please make sure computer IP is correct")
@@ -87,16 +119,30 @@ async def net_data():
     This method returns global variables
     :return:
     """
-    msg = {
-        "radio_ip": RADIO_IP,
-        "node_ids": NODE_LIST,
-        "node_ips": IP_LIST
-    }
-    return msg
+    global IP_LIST, NODE_LIST
+
+    # TODO: add labels to list
+
+    if IP_LIST and NODE_LIST:
+        ip_id_dict = [{"ip": ip, "id": idd} for ip, idd in zip(IP_LIST, NODE_LIST)]
+
+        snrs = net_status(RADIO_IP, NODE_LIST)
+
+        # snr_dict = [{"ip1": res[0][0], "ip2": res[0][1], "snr": res[1]} for res in snrs]
+
+        msg = {
+            "device-list": ip_id_dict,
+            "snr-list": snrs
+        }
+
+    else:
+        msg = {"Error, no IPS in network"}
+
+    return json.dumps({"type": "net-data", "data": msg})
 
 
 @app.post("/basic-settings")
-async def basic_settings(settings: Optional[BasicSettings]=None):
+async def basic_settings(settings: Optional[BasicSettings] = None):
     """
     :return:
     """
@@ -164,7 +210,7 @@ async def get_battery():
     ips_batteries = get_batteries(IP_LIST)
     print("Updated battery status")
     print(ips_batteries)
-    return ips_batteries
+    return {"type": "battery", "data": ips_batteries}
 
 
 async def send_messages(websocket: WebSocket, interval, func):
@@ -175,6 +221,7 @@ async def send_messages(websocket: WebSocket, interval, func):
         await asyncio.sleep(interval)
 
 
+# TODO: add parameters to ws (so user could control frequency)
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -189,7 +236,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # Create tasks for different message frequencies
         task1 = asyncio.create_task(send_messages(websocket, 20, get_battery))
         task2 = asyncio.create_task(send_messages(websocket, 9, update_vars))
-        task3 = asyncio.create_task(send_messages(websocket, 10, net_stat))
+        task3 = asyncio.create_task(send_messages(websocket, 10, net_data))
 
         # Wait for both tasks to complete (they won't, unless there's an error)
         await asyncio.gather(task1, task2, task3)
@@ -215,7 +262,6 @@ async def set_ptt_group(ptt_data: PttData):
 @app.get("/get-camera-links")
 async def get_camera():
     # TODO: test camera_finder with cameras (connect different devices, interfaces etc...)
-    # TODO: add substreams and audio streams
     """
     This endpoint will return the stream URLs of existing cameras in network
     existing URLs include main-stream, sub-stream and audio-stream

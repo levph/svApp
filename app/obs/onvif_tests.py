@@ -1,10 +1,9 @@
 from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
-from wsdiscovery import QName, Scope
+from wsdiscovery import QName
 from onvif import ONVIFCamera
 from urllib.parse import urlparse
 import cv2
 # import vlc
-import time
 lev=1
 
 def perform_ptz(camera, move, timeout=1):

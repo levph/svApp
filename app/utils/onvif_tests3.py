@@ -1,7 +1,5 @@
 # Replace 'stream_uri' with the actual stream URI obtained in the previous step
 import cv2
-from ffpyplayer.player import MediaPlayer
-import threading
 
 main_stream_uri = 'rtsp://172.20.254.66:554/av0_0'  # Replace with your main stream URI
 stream2 = "rtsp://172.20.245.64:554/av0_1"

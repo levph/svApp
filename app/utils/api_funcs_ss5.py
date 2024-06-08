@@ -15,9 +15,6 @@ functions to start:
 
 import requests
 import json
-import socket
-
-import utils.send_commands
 
 from utils.send_commands import send_commands_ip
 
@@ -257,16 +254,17 @@ def net_status(radio_ip, nodelist):
     snr_report = json.loads(response.text)
 
     # Extracting unique [id, id, value] tuples from the result arrays
-    snr_tuples = set((tuple(sorted([result[i], result[i + 1]])), result[i + 2])
-                     for sublist in snr_report
-                     for entry in sublist
-                     for result in [entry['result']]
-                     for i in range(0, len(result), 3))
+    snrs = {tuple(sorted(result[i:i + 2])): result[i + 2]
+            for sublist in snr_report
+            for entry in sublist
+            for result in [entry['result']]
+            for i in range(0, len(result), 3)}
 
     # Converting tuples back to lists
-    result = [list(t) for t in snr_tuples]
+    # result = [list(t) for t in snr_tuples]
+    snrs_dict = [{"id1": k[0], "id2": k[1], "snr": v} for k, v in snrs.items()]
 
-    return result
+    return snrs_dict
 
 
 # TODO: test and use send command all
@@ -363,4 +361,3 @@ def get_basic_set(radio_ip):
 #
 #     net_stat = send_commands_ip("network_status", ip=ip)
 #     print(net_stat)
-

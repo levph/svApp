@@ -1,6 +1,6 @@
 import os
 
-from utils.obs.get_radio_ip import sniff_target_ip
+from obs import sniff_target_ip
 from utils.net_battery_percent import get_batteries, node_labels, save_node_label, list_devices, net_status
 from utils.list_cameras import find_cameras
 from utils.fa_models import BasicSettings

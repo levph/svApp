@@ -27,6 +27,11 @@ class PttData(BaseModel):
     statuses: list[list[int]]
 
 
+class Credentials(BaseModel):
+    username: str
+    password: str
+
+
 class BasicSettings(BaseModel):
     set_net_flag: int
     frequency: float

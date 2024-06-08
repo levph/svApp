@@ -5,10 +5,7 @@ opus_lib_path = "/opt/homebrew/Cellar/opus/1.5.2/lib"
 os.environ["DYLD_LIBRARY_PATH"] = f"{opus_lib_path}:{os.environ.get('DYLD_LIBRARY_PATH', '')}"
 
 # Now import the required libraries
-import socket
-import struct
 from scapy.all import *
-import sounddevice as sd
 import numpy as np
 import opuslib
 import soundfile as sf
