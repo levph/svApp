@@ -1,4 +1,5 @@
 import requests
+import json
 
 
 def send_command_ip(method, ip, params=None):
@@ -41,14 +42,37 @@ def change_led(s_ip, param):
     print("LED Toggled")
 
 
-def net_status(s_ip):
+def net_status(radio_ip, nodelist):
     """
     return devices in network and SNR between them
+    :param radio_ip:
     :param s_ip:
     :return:
     """
-    network_status = send_command_ip("network_status", s_ip)
-    return network_status
+    url = f'http://{radio_ip}/bcast_enc.py'
+
+    payload = f'{{"apis":[{{"method":"network_status","params":{{}}}}],"nodeids":{nodelist}}}'
+
+    headers = {
+        'Accept': '*/*',
+        'Content-Type': 'text/plain',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+    snr_report = json.loads(response.text)
+
+    # Extracting unique [id, id, value] tuples from the result arrays
+    unique_tuples = set((result[i], result[i + 1], result[i + 2])
+                        for sublist in snr_report
+                        for entry in sublist
+                        for result in [entry['result']]
+                        for i in range(0, len(result), 3))
+
+    # Converting tuples back to lists
+    result = [list(t) for t in unique_tuples]
+
+    return result
 
 
 def list_devices(s_ip):
@@ -65,10 +89,15 @@ def list_devices(s_ip):
 
 def get_batteries(ips):
     # print battery percentage for each
+    percents = []
+
     for radio_ip in ips:
         battery_percentage = send_command_ip("battery_percent", radio_ip)
-
         print(f'Radio IP: {radio_ip}, Battery: {battery_percentage["result"][0]}')
+        percents.append(battery_percentage["result"][0])
+
+    result = [{"ip": ip, "%": percent} for ip, percent in zip(ips, percents)]
+    return result
 
 
 def node_labels(s_ip):
