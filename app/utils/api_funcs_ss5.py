@@ -16,16 +16,17 @@ functions to start:
 import requests
 import json
 
-from utils.send_commands import send_commands_ip
+from utils.send_commands import send_commands_ip, send_net_stat
 
 
-def get_rssi_report(ip):
-    # enable rssi report
-    res = send_commands_ip(methods=["rssi_report_address"], radio_ip=ip, params=[["172.20.2.1", "30000"]])
 
-    # set rssi report timing
-    res2 = send_commands_ip(methods=["rssi_report_period"], radio_ip=ip, params=[["500"]])
-    lev = 1
+# def get_rssi_report(ip):
+#     # enable rssi report
+#     res = send_commands_ip(methods=["rssi_report_address"], radio_ip=ip, params=[["172.20.2.1", "30000"]])
+
+#     # set rssi report timing
+#     res2 = send_commands_ip(methods=["rssi_report_period"], radio_ip=ip, params=[["500"]])
+#     lev = 1
 
 
 def node_id_to_ip(nodelist):
@@ -240,17 +241,8 @@ def net_status(radio_ip, nodelist):
     :param s_ip:
     :return:
     """
-    url = f'http://{radio_ip}/bcast_enc.pyc'
-
-    payload = f'{{"apis":[{{"method":"network_status","params":{{}}}}],"nodeids":{nodelist}}}'
-
-    headers = {
-        'Accept': '*/*',
-        'Content-Type': 'text/plain',
-        'X-Requested-With': 'XMLHttpRequest'
-    }
-
-    response = requests.request("POST", url, headers=headers, data=payload)
+    
+    response = send_net_stat(radio_ip, nodelist)
     snr_report = json.loads(response.text)
 
     # Extracting unique [id, id, value] tuples from the result arrays
@@ -351,13 +343,3 @@ def get_basic_set(radio_ip):
     }
 
     return res
-
-# def test_routing_tree():
-#     ip = "172.20.238.213"
-#     ip2 = "172.20.241.202"
-#     route_tree = send_commands_ip("routing_tree", ip=ip)
-#
-#     connected_devices = send_commands_ip("read_client_list", ip=ip2)
-#
-#     net_stat = send_commands_ip("network_status", ip=ip)
-#     print(net_stat)

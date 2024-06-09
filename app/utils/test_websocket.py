@@ -5,7 +5,7 @@ import time
 
 async def test_websocket():
 
-    uri = "ws://localhost:8000/ws"
+    uri = "ws://localhost:8080/ws"
     async with websockets.connect(uri) as websocket:
         start_time = time.time()
         try:
@@ -18,7 +18,7 @@ async def test_websocket():
                 # Reset the timer
                 start_time = time.time()
                 # Optionally limit the number of messages to check
-        except websockets.exceptions.ConnectionClosed:
+        except websockets.exceptions.ConnectionClosed as e:
             print("Connection closed by server")
 
 
