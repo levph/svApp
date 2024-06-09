@@ -8,6 +8,9 @@ from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
     get_basic_set
 import json
+from requests.exceptions import Timeout
+from utils.send_commands import api_login
+
 
 app = FastAPI()
 
@@ -65,9 +68,14 @@ async def startup_event():
         # get list of devices in network
         print(f"Radio IP set to {RADIO_IP}\n")
         try:
-            [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+            [IP_LIST, NODE_LIST] = await list_devices(RADIO_IP)
+
+        except Timeout:
+            print(f"Request timed out. Make sure computer IP is correct")
+        
         except Exception as e:
-            print(f"Error. Please make sure computer IP is correct")
+            if "Authentication error" in e.args[0]:
+                print(f"This device is password protected. Please log-in")
             print(e)
         else:
             print(f"Node List set to {NODE_LIST}")
@@ -78,9 +86,24 @@ async def startup_event():
 async def log_in(credentials: Credentials):
     """
     Future method to allow log in for locked devices
-    :param credentials:
+    :param credentials: includes username and password strings
     :return:
     """
+    global RADIO_IP
+    try:
+        username = credentials.username
+        pw = credentials.password
+        res = await api_login(username, pw, RADIO_IP)
+        if res:
+            msg = "Success"
+            # update variables after logging in
+            await update_vars()
+        else:
+            msg = "Fail"
+        return msg
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/set-radio-ip")
@@ -98,11 +121,11 @@ async def set_radio_ip(ip: RadioIP):
         print(f"Radio IP set to {RADIO_IP}\n")
         try:
             # run an api call to make sure IP was inserted correctly
-            [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+            [IP_LIST, NODE_LIST] = await list_devices(RADIO_IP)
         except Exception as e:
             print(f"Error. Please make sure computer IP is correct")
             print(e)
-            msg = {"Error. Please make sure computer IP is correct"}
+            msg = { "Error. Please make sure computer IP is correct"}
         else:
             print(f"Node List set to {NODE_LIST}")
             print(f"IP List set to {IP_LIST}\n")
@@ -113,6 +136,7 @@ async def set_radio_ip(ip: RadioIP):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# TODO: test after encryption update
 @app.get("/net-data")
 async def net_data():
     """
@@ -126,7 +150,7 @@ async def net_data():
     if IP_LIST and NODE_LIST:
         ip_id_dict = [{"ip": ip, "id": idd} for ip, idd in zip(IP_LIST, NODE_LIST)]
 
-        snrs = net_status(RADIO_IP, NODE_LIST)
+        snrs = await net_status(RADIO_IP, NODE_LIST[:-1]) # N-1 queries is enough to know all SNRs
 
         # snr_dict = [{"ip1": res[0][0], "ip2": res[0][1], "snr": res[1]} for res in snrs]
 
@@ -136,7 +160,7 @@ async def net_data():
         }
 
     else:
-        msg = {"Error, no IPS in network"}
+        msg = "Error, no IPS in network"
 
     return json.dumps({"type": "net-data", "data": msg})
 
@@ -148,12 +172,12 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
     """
     try:
         if settings:
-            response = set_basic.set_basic_settings(RADIO_IP, NODE_LIST, settings)
+            response = await set_basic.set_basic_settings(RADIO_IP, NODE_LIST, settings)
             msg = {"Error"} if "error" in response else {"Success"}
 
             return msg
         else:
-            response = get_basic_set(RADIO_IP)
+            response = await get_basic_set(RADIO_IP)
             return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -166,7 +190,7 @@ async def net_stat():
     :return:
     """
     global RADIO_IP, NODE_LIST
-    res = net_status(RADIO_IP, NODE_LIST)
+    res = await net_status(RADIO_IP, NODE_LIST)
     return res
 
 
@@ -182,7 +206,7 @@ async def update_vars():
     valid = 1
     RADIO_IP = RADIO_IP if RADIO_IP else sniff_target_ip()
     try:
-        [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+        [IP_LIST, NODE_LIST] = await list_devices(RADIO_IP)
     except Exception as e:
         print(e)
         RADIO_IP, NODE_LIST, IP_LIST = [], [], []
@@ -207,10 +231,10 @@ async def get_battery():
     ips_batteries - list of radio_ip - bettery status
     """
     global IP_LIST
-    ips_batteries = get_batteries(IP_LIST)
+    ips_batteries = await get_batteries(IP_LIST)
     print("Updated battery status")
     print(ips_batteries)
-    return {"type": "battery", "data": ips_batteries}
+    return json.dumps({"type": "battery", "data": ips_batteries})
 
 
 async def send_messages(websocket: WebSocket, interval, func):
@@ -269,7 +293,7 @@ async def get_camera():
     """
     global IP_LIST
     try:
-        streams = find_camera_streams_temp(IP_LIST)
+        streams = await find_camera_streams_temp(IP_LIST)
         # msg = ["Success" if res else "Failed"]
         msg = "Success"
         return {"message": msg, "data": streams}
@@ -280,4 +304,4 @@ async def get_camera():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8080)

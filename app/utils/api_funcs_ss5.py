@@ -16,16 +16,17 @@ functions to start:
 import requests
 import json
 
-from utils.send_commands import send_commands_ip
+from utils.send_commands import send_commands_ip, send_net_stat
 
 
-def get_rssi_report(ip):
-    # enable rssi report
-    res = send_commands_ip(methods=["rssi_report_address"], radio_ip=ip, params=[["172.20.2.1", "30000"]])
 
-    # set rssi report timing
-    res2 = send_commands_ip(methods=["rssi_report_period"], radio_ip=ip, params=[["500"]])
-    lev = 1
+# def get_rssi_report(ip):
+#     # enable rssi report
+#     res = send_commands_ip(methods=["rssi_report_address"], radio_ip=ip, params=[["172.20.2.1", "30000"]])
+
+#     # set rssi report timing
+#     res2 = send_commands_ip(methods=["rssi_report_period"], radio_ip=ip, params=[["500"]])
+#     lev = 1
 
 
 def node_id_to_ip(nodelist):
@@ -70,8 +71,8 @@ def node_id_to_ip(nodelist):
     return ips
 
 
-def list_devices(s_ip):
-    node_ids = send_commands_ip(["routing_tree"], radio_ip=s_ip, params=[[]])
+async def list_devices(s_ip):
+    node_ids = await send_commands_ip(["routing_tree"], radio_ip=s_ip, params=[[]])
 
     # translate ids of all the nodes to ip
     ips = node_id_to_ip(node_ids)
@@ -79,7 +80,7 @@ def list_devices(s_ip):
     return ips, node_ids
 
 
-def find_camera_streams_temp(iplist):
+async def find_camera_streams_temp(iplist):
     """
     this method is temporary and assumes all cameras are silvus cameras
     with specific URLs for RTSP streams!
@@ -92,7 +93,7 @@ def find_camera_streams_temp(iplist):
 
     # find connected devices in each node
     for iip in iplist:
-        devices = send_commands_ip(["read_client_list"], radio_ip=iip, params=[[]])
+        devices = await send_commands_ip(["read_client_list"], radio_ip=iip, params=[[]])
         filtered_devices = [device for device in devices if not device['mac'].startswith('c4:7c:8d')]
         for device in filtered_devices:
             ip = device['ip']
@@ -232,7 +233,7 @@ def find_camera_streams_temp(iplist):
 
 
 # TODO: test
-def net_status(radio_ip, nodelist):
+async def net_status(radio_ip, nodelist):
     """
     return devices in network and SNR between them
     :param nodelist:
@@ -240,17 +241,8 @@ def net_status(radio_ip, nodelist):
     :param s_ip:
     :return:
     """
-    url = f'http://{radio_ip}/bcast_enc.pyc'
-
-    payload = f'{{"apis":[{{"method":"network_status","params":{{}}}}],"nodeids":{nodelist}}}'
-
-    headers = {
-        'Accept': '*/*',
-        'Content-Type': 'text/plain',
-        'X-Requested-With': 'XMLHttpRequest'
-    }
-
-    response = requests.request("POST", url, headers=headers, data=payload)
+    
+    response = await send_net_stat(radio_ip, nodelist)
     snr_report = json.loads(response.text)
 
     # Extracting unique [id, id, value] tuples from the result arrays
@@ -268,12 +260,12 @@ def net_status(radio_ip, nodelist):
 
 
 # TODO: test and use send command all
-def get_batteries(ips):
+async def get_batteries(ips):
     # print battery percentage for each
     percents = []
 
     for radio_ip in ips:
-        battery_percentage = send_commands_ip(["battery_percent"], radio_ip=radio_ip, params=[[]])
+        battery_percentage = await send_commands_ip(["battery_percent"], radio_ip=radio_ip, params=[[]])
         print(f'Radio IP: {radio_ip}, Battery: {battery_percentage[0]}')
         percents.append(battery_percentage[0])
 
@@ -281,7 +273,7 @@ def get_batteries(ips):
     return result
 
 
-def set_ptt_groups(ips, num_groups, statuses):
+async def set_ptt_groups(ips, num_groups, statuses):
     """
     This method sets ptt group settings for all radios
     :param ips: ips of radios to change group settings
@@ -296,7 +288,7 @@ def set_ptt_groups(ips, num_groups, statuses):
     # set groups for all radios
     for ip in ips:
         methods = ["ptt_mcast_group"] * len(group_ips)
-        res = send_commands_ip(methods=methods, radio_ip=ip, params=group_ips)
+        res = await send_commands_ip(methods=methods, radio_ip=ip, params=group_ips)
         # for g in group_ips:
         #     res = send_commands_ip(["ptt_mcast_group"], ip=ip, params=g)
 
@@ -326,12 +318,12 @@ def set_ptt_groups(ips, num_groups, statuses):
         ptt_settings.append([ptt_str])
 
     for ii in range(len(ips)):
-        res = send_commands_ip(["ptt_active_mcast_group"], radio_ip=ips[ii], params=[ptt_settings[ii]])
+        res = await send_commands_ip(["ptt_active_mcast_group"], radio_ip=ips[ii], params=[ptt_settings[ii]])
 
     return "Success maybe"
 
 
-def get_basic_set(radio_ip):
+async def get_basic_set(radio_ip):
     """
     get current settings of frequency, bandwidth, net_id and power of current device
     :param radio_ip:
@@ -340,7 +332,7 @@ def get_basic_set(radio_ip):
     methods = ["freq", "bw", "power_dBm", "nw_name"]
     params = [[]] * 4
 
-    res = send_commands_ip(methods, radio_ip, params)
+    res = await send_commands_ip(methods, radio_ip, params)
 
     res = {
         "set_net_flag": [],
