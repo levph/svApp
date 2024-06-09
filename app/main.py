@@ -196,7 +196,7 @@ async def update_vars():
 
     msg = f"{RADIO_IP} is connected" if valid else f"No Radio is connected"
     msg = {"type": "update", "data": msg}
-    return msg
+    return json.dumps(msg)
 
 
 @app.get("/get-battery")
