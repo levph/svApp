@@ -195,7 +195,7 @@ async def update_vars():
         print(f"IP List set to {IP_LIST}")
 
     msg = f"{RADIO_IP} is connected" if valid else f"No Radio is connected"
-
+    msg = {"type": "update", "data": msg}
     return msg
 
 
