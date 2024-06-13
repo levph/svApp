@@ -9,7 +9,14 @@ from scapy.all import *
 from scapy.all import sniff, Ether, get_working_ifaces
 import psutil
 import socket
+from scapy.all import sniff, get_if_addr, get_if_list
+import threading
 
+# Lock to control access to radio ip
+lock = threading.Lock()
+
+# Condition variable to notify all threads to stop
+stop_condition = threading.Condition()
 
 
 # Define the MAC prefix and IP range
@@ -41,10 +48,15 @@ def packet_callback(packet):
         if dst_mac.lower() == broadcast_mac:
             # Check if the source MAC address matches the prefix and the IP is in the expected range
             if src_mac.lower().startswith(mac_prefix) and src_ip.startswith(ip_range):
-                print(f"Received Silvus discovery message from {src_ip}")
-                radio_ip = src_ip
-                return True
-    return False
+                with lock:
+                    if radio_ip is None:
+                        print(f"Received Silvus discovery message from {src_ip}")
+                        radio_ip = src_ip
+                        with stop_condition:
+                            stop_condition.notify_all()
+                        
+                    
+    
 
 
 def get_interface_by_ip(target_ip):
@@ -56,10 +68,14 @@ def get_interface_by_ip(target_ip):
     return None
 
 def get_iface_name():
-    # name = get_interface_by_ip("172.")
     working_ifaces = get_working_ifaces()
     iface_name = [iface.network_name for iface in working_ifaces if iface.ip.startswith("172.")]
     return iface_name
+
+def sniffer(if_name):
+    # sniff(iface=if_name,stop_filter=packet_callback, store=0, timeout=10)
+    sniff(iface=if_name, prn=packet_callback, stop_filter=lambda x: radio_ip is not None, timeout=2)
+
 
 def sniff_target_ip():
     """
@@ -67,8 +83,19 @@ def sniff_target_ip():
     when the packet is found.
     """
     iface_name = get_iface_name()
+    if len(iface_name) == 1:
+        sniffer(str(iface_name[0]))
+    elif len(iface_name)>1:
+        threads = []
+        for iface in iface_name:
+            th = threading.Thread(target=sniffer, args=(iface,))
+            threads.append(th)
+            th.start()
 
-    sniff(iface=iface_name,stop_filter=packet_callback, store=0, timeout=10)
+        # Join threads to wait for them to complete
+        for thread in threads:
+            thread.join()
+
 
     print(f"\nRadio IP is {radio_ip}")
     return radio_ip
