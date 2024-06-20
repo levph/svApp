@@ -11,7 +11,6 @@ import json
 from requests.exceptions import Timeout
 from utils.send_commands import api_login
 
-
 app = FastAPI()
 
 origins = [
@@ -43,49 +42,72 @@ VERSION = None
 CAM_DATA = None
 
 
-# TODO: fix with new version (in mail haha)
-@app.on_event("startup")
-async def startup_event():
+@app.post("/start-up")
+async def start_up():
     """
-    Method to run on application startup, find IP of local device, list of nodes in network
-    :return:
+    This method is called from log-in screen. Find radio IP and whether he is protected or not.
+    Updates relevant global variables.
+    :return: json with type and msg fields
     """
     global RADIO_IP, NODE_LIST, IP_LIST
-
     try:
-        RADIO_IP = sniff_target_ip()
-    except Exception as e:
-        # If we got an error then most likely there's no connected Radio
-        # TODO: use exception to tell user how to fix it
-        print(f"Can't find connected device\n")
-        print(e)
-    else:
-        if not RADIO_IP:
-            print(f"No Radio connected.\n")
-            return
-        # if we found a device
+        response = {"type": None, "msg": None}
 
-        # get list of devices in network
-        print(f"Radio IP set to {RADIO_IP}\n")
         try:
-            [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
-
-        except Timeout:
-            print(f"Request timed out. Make sure computer IP is correct")
-        
+            # sniff across interfaces to find Radio Discovery message
+            RADIO_IP = RADIO_IP if RADIO_IP else sniff_target_ip()
         except Exception as e:
-            if "Authentication error" in e.args[0]:
-                print(f"This device is password protected. Please log-in")
-            print(e)
+            # If we got an error then most likely there's no connected Radio
+            print(f"Can't find connected device\n")
+            response["type"] = "Fail"
+            response["msg"] = "Error when scanning net"
+
         else:
-            print(f"Node List set to {NODE_LIST}")
-            print(f"IP List set to {IP_LIST}\n")
+            if not RADIO_IP:
+                print(f"No Radio connected.\n")
+                response["type"] = "Fail"
+                response["msg"] = "Can't find connected device"
+
+            else:
+                # if we found a device
+
+                # get list of devices in network
+                print(f"Radio IP set to {RADIO_IP}\n")
+                try:
+                    [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+
+                except Timeout:
+                    print(f"Request timed out. Make sure computer/radio IP is correct")
+                    response["type"] = "Fail"
+                    response["msg"] = "Incorrect Computer IP"
+
+                except Exception as e:
+                    if "Authentication error" in e.args[0]:
+                        print(f"This device is password protected. Please log-in")
+                        response["type"] = "Success"
+                        response["msg"] = {"ip": RADIO_IP, "is_protected": 1}
+                    else:
+                        print(f"Unknown Error")
+                        response["type"] = "Fail"
+                        response["msg"] = "Unknown Error"
+                    print(e)
+                else:
+                    print(f"Node List set to {NODE_LIST}")
+                    print(f"IP List set to {IP_LIST}\n")
+
+                    response["type"] = "Success"
+                    response["msg"] = {"ip": RADIO_IP, "is_protected": 0}
+
+        return response
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/log-in")
 async def log_in(credentials: Credentials):
     """
-    Future method to allow log in for locked devices
+    method to allow log in for locked devices
     :param credentials: includes username and password strings
     :return:
     """
@@ -101,7 +123,7 @@ async def log_in(credentials: Credentials):
         else:
             msg = "Fail"
         return msg
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -116,22 +138,8 @@ async def set_radio_ip(ip: RadioIP):
     global RADIO_IP, NODE_LIST, IP_LIST
     try:
         RADIO_IP = ip.radio_ip
-
-        # get list of devices in network
-        print(f"Radio IP set to {RADIO_IP}\n")
-        try:
-            # run an api call to make sure IP was inserted correctly
-            [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
-        except Exception as e:
-            print(f"Error. Please make sure computer IP is correct")
-            print(e)
-            msg = { "Error. Please make sure computer IP is correct"}
-        else:
-            print(f"Node List set to {NODE_LIST}")
-            print(f"IP List set to {IP_LIST}\n")
-            msg = {"radio_ip": RADIO_IP, "node_list": NODE_LIST, "node_ip_list": IP_LIST}
-
-        return msg
+        res = await start_up()
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -150,7 +158,7 @@ async def net_data():
     if IP_LIST and NODE_LIST:
         ip_id_dict = [{"ip": ip, "id": idd} for ip, idd in zip(IP_LIST, NODE_LIST)]
 
-        snrs = net_status(RADIO_IP, NODE_LIST[:-1]) # N-1 queries is enough to know all SNRs
+        snrs = net_status(RADIO_IP, NODE_LIST[:-1])  # N-1 queries is enough to know all SNRs
 
         # snr_dict = [{"ip1": res[0][0], "ip2": res[0][1], "snr": res[1]} for res in snrs]
 
@@ -211,7 +219,7 @@ async def update_vars():
         print(e)
         RADIO_IP, NODE_LIST, IP_LIST = [], [], []
         print(f"Searching for new connected device...")
-        await startup_event()
+        await start_up()
         valid = 1 if RADIO_IP else 0
     else:
         print(f"Radio IP set to {RADIO_IP}")
@@ -258,9 +266,9 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
 
         # Create tasks for different message frequencies
-        task1 = asyncio.create_task(send_messages(websocket, 20, get_battery))
-        task2 = asyncio.create_task(send_messages(websocket, 9, update_vars))
-        task3 = asyncio.create_task(send_messages(websocket, 10, net_data))
+        task1 = asyncio.create_task(send_messages(websocket, 300, get_battery))
+        task2 = asyncio.create_task(send_messages(websocket, 2, update_vars))
+        task3 = asyncio.create_task(send_messages(websocket, 2, net_data))
 
         # Wait for both tasks to complete (they won't, unless there's an error)
         await asyncio.gather(task1, task2, task3)
