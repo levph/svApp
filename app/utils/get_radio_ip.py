@@ -18,7 +18,6 @@ lock = threading.Lock()
 # Condition variable to notify all threads to stop
 stop_condition = threading.Condition()
 
-
 # Define the MAC prefix and IP range
 radio_ip = None
 mac_prefix = "c4:7c:8d"
@@ -54,9 +53,6 @@ def packet_callback(packet):
                         radio_ip = src_ip
                         with stop_condition:
                             stop_condition.notify_all()
-                        
-                    
-    
 
 
 def get_interface_by_ip(target_ip):
@@ -67,14 +63,16 @@ def get_interface_by_ip(target_ip):
                 return iface_name
     return None
 
+
 def get_iface_name():
     working_ifaces = get_working_ifaces()
-    iface_name = [iface.network_name for iface in working_ifaces if iface.ip.startswith("172.")]
+    iface_name = [iface.network_name for iface in working_ifaces if iface.ip.startswith("172.20")]
     return iface_name
+
 
 def sniffer(if_name):
     # sniff(iface=if_name,stop_filter=packet_callback, store=0, timeout=10)
-    sniff(iface=if_name, prn=packet_callback, stop_filter=lambda x: radio_ip is not None, timeout=2)
+    sniff(iface=if_name, prn=packet_callback, stop_filter=lambda x: radio_ip is not None, timeout=3)
 
 
 def sniff_target_ip():
@@ -85,7 +83,7 @@ def sniff_target_ip():
     iface_name = get_iface_name()
     if len(iface_name) == 1:
         sniffer(str(iface_name[0]))
-    elif len(iface_name)>1:
+    elif len(iface_name) > 1:
         threads = []
         for iface in iface_name:
             th = threading.Thread(target=sniffer, args=(iface,))
@@ -96,7 +94,6 @@ def sniff_target_ip():
         for thread in threads:
             thread.join()
 
-
     print(f"\nRadio IP is {radio_ip}")
     return radio_ip
 
@@ -104,5 +101,4 @@ def sniff_target_ip():
 if __name__ == "__main__":
     ip = sniff_target_ip()
 
-    
 # sniff_target_ip()
