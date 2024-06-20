@@ -11,7 +11,6 @@ import json
 from requests.exceptions import Timeout
 from utils.send_commands import api_login
 
-
 app = FastAPI()
 
 origins = [
@@ -72,7 +71,7 @@ async def startup_event():
 
         except Timeout:
             print(f"Request timed out. Make sure computer IP is correct")
-        
+
         except Exception as e:
             if "Authentication error" in e.args[0]:
                 print(f"This device is password protected. Please log-in")
@@ -80,6 +79,61 @@ async def startup_event():
         else:
             print(f"Node List set to {NODE_LIST}")
             print(f"IP List set to {IP_LIST}\n")
+
+
+@app.post("/start-up")
+async def start_up():
+    global RADIO_IP, NODE_LIST, IP_LIST
+    try:
+        response = {"type": None, "msg": None}
+
+        try:
+            # sniff across interfaces to find Radio Discovery message
+            RADIO_IP = sniff_target_ip()
+        except Exception as e:
+            # If we got an error then most likely there's no connected Radio
+            print(f"Can't find connected device\n")
+            response["type"] = "Fail"
+            response["msg"] = "Error when scanning net"
+
+        else:
+            if not RADIO_IP:
+                print(f"No Radio connected.\n")
+                response["type"] = "Fail"
+                response["msg"] = "Can't find connected device"
+                return
+            else:
+                # if we found a device
+
+                # get list of devices in network
+                print(f"Radio IP set to {RADIO_IP}\n")
+                try:
+                    [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+
+                except Timeout:
+                    print(f"Request timed out. Make sure computer IP is correct")
+                    response["type"] = "Fail"
+                    response["msg"] = "Incorrect Computer IP"
+
+                except Exception as e:
+                    if "Authentication error" in e.args[0]:
+                        print(f"This device is password protected. Please log-in")
+                        response["type"] = "Success"
+                        response["msg"] = {"ip": RADIO_IP, "is_protected": 1}
+                    else:
+                        print(f"Unknown Error")
+                        response["type"] = "Fail"
+                        response["msg"] = "Unknown Error"
+                    print(e)
+                else:
+                    print(f"Node List set to {NODE_LIST}")
+                    print(f"IP List set to {IP_LIST}\n")
+
+                    response["type"] = "Success"
+                    response["msg"] = {"ip": RADIO_IP, "is_protected": 0}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/log-in")
@@ -101,7 +155,7 @@ async def log_in(credentials: Credentials):
         else:
             msg = "Fail"
         return msg
-    
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -125,7 +179,7 @@ async def set_radio_ip(ip: RadioIP):
         except Exception as e:
             print(f"Error. Please make sure computer IP is correct")
             print(e)
-            msg = { "Error. Please make sure computer IP is correct"}
+            msg = {"Error. Please make sure computer IP is correct"}
         else:
             print(f"Node List set to {NODE_LIST}")
             print(f"IP List set to {IP_LIST}\n")
@@ -150,7 +204,7 @@ async def net_data():
     if IP_LIST and NODE_LIST:
         ip_id_dict = [{"ip": ip, "id": idd} for ip, idd in zip(IP_LIST, NODE_LIST)]
 
-        snrs = net_status(RADIO_IP, NODE_LIST[:-1]) # N-1 queries is enough to know all SNRs
+        snrs = net_status(RADIO_IP, NODE_LIST[:-1])  # N-1 queries is enough to know all SNRs
 
         # snr_dict = [{"ip1": res[0][0], "ip2": res[0][1], "snr": res[1]} for res in snrs]
 
