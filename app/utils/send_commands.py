@@ -6,16 +6,17 @@ lock = asyncio.Lock()
 
 COOKIE = None
 
+
 def api_login(un, pw, radio_ip):
     """
     Login function
     """
     global COOKIE
-    
+
     # define parameters for log-in query
     login_url = f"http://{radio_ip}/login.sh?username={un}&password={pw}&Submit=1"
-    
-    response = requests.post(login_url) #, data=payload)
+
+    response = requests.post(login_url)  # , data=payload)
     if response.status_code == 200:
         try:
             COOKIE = response.cookies
@@ -28,9 +29,10 @@ def api_login(un, pw, radio_ip):
     else:
         return False
 
+
 # TODO: test!!! add error handling and generic sending for special URLs
 def send_net_stat(radio_ip, nodelist):
-    global COOKIE 
+    global COOKIE
 
     url = f'http://{radio_ip}/bcast_enc.pyc'
 
@@ -41,13 +43,12 @@ def send_net_stat(radio_ip, nodelist):
         'Content-Type': 'text/plain',
         'X-Requested-With': 'XMLHttpRequest'
     }
-    
-    response = requests.post(url, headers=headers, data=payload, timeout=10, cookies = COOKIE)
+
+    response = requests.post(url, headers=headers, data=payload, timeout=10, cookies=COOKIE)
     if response.status_code == 200:
         COOKIE = response.cookies
     return response
-            
-    
+
 
 def send_commands_ip(methods, radio_ip, params=None, timeout=None):
     """
@@ -68,14 +69,15 @@ def send_commands_ip(methods, radio_ip, params=None, timeout=None):
     } for i in range(len(methods))]
 
     payload = json.dumps(command_list if len(methods) > 1 else command_list[0])
+    if methods[0] == "streamscape_data" or len(methods) > 1:
+        api_endpoint = f"http://{radio_ip}/cgi-bin/streamscape_api"
+    else:
+        api_endpoint = f"http://{radio_ip}/streamscape_api"
 
-    api_endpoint = f'http://{radio_ip}/streamscape_api' if len(
-        methods) < 2 else f"http://{radio_ip}/cgi-bin/streamscape_api"
- 
     try:
-        response = requests.post(api_endpoint, payload, timeout=10, cookies = COOKIE)
+        response = requests.post(api_endpoint, payload, timeout=10, cookies=COOKIE)
         # response = requests.post(api_endpoint, payload, timeout=10, cookies=COOKIE)
-        
+
         response.raise_for_status()  # Raise an exception for HTTP errors
         temp_cookie = response.cookies
         response = response.json()

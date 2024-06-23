@@ -19,7 +19,6 @@ import json
 from utils.send_commands import send_commands_ip, send_net_stat
 
 
-
 # def get_rssi_report(ip):
 #     # enable rssi report
 #     res = send_commands_ip(methods=["rssi_report_address"], radio_ip=ip, params=[["172.20.2.1", "30000"]])
@@ -233,7 +232,7 @@ def find_camera_streams_temp(iplist):
 
 
 # TODO: test
-def net_status(radio_ip, nodelist):
+def net_status(radio_ip):
     """
     return devices in network and SNR between them
     :param nodelist:
@@ -241,22 +240,35 @@ def net_status(radio_ip, nodelist):
     :param s_ip:
     :return:
     """
-    
-    response = send_net_stat(radio_ip, nodelist)
-    snr_report = json.loads(response.text)
 
-    # Extracting unique [id, id, value] tuples from the result arrays
-    snrs = {tuple(sorted(result[i:i + 2])): result[i + 2]
-            for sublist in snr_report
-            for entry in sublist
-            for result in [entry['result']]
-            for i in range(0, len(result), 3)}
+    def extract_snr(data):
+        node_iids = []
+        min_snr = {}
+        for node in data:
+            node_iids.append(int(node["id"]))
+            for adjacency in node.get("adjacencies", []):
+                nodeTo = adjacency["nodeTo"]
+                nodeFrom = adjacency["nodeFrom"]
+                snr_key = f"$snr_{nodeFrom}_{nodeTo}"
+                if snr_key in adjacency["data"]:
+                    snr = int(adjacency["data"][snr_key])
 
-    # Converting tuples back to lists
-    # result = [list(t) for t in snr_tuples]
-    snrs_dict = [{"id1": k[0], "id2": k[1], "snr": v} for k, v in snrs.items()]
+                    # Create a sorted tuple to ensure (a, b) is the same as (b, a)
+                    pair = tuple(sorted([nodeFrom, nodeTo]))
 
-    return snrs_dict
+                    # Update the minimum SNR value for the pair
+                    if pair in min_snr:
+                        min_snr[pair] = min(min_snr[pair], snr)
+                    else:
+                        min_snr[pair] = snr
+
+        snr_res = [{"id1": k[0], "id2": k[1], "snr": v} for k, v in min_snr.items()]
+
+        return snr_res
+
+    response = send_commands_ip(["streamscape_data"], radio_ip, [[]])
+
+    return extract_snr(response)
 
 
 # TODO: test and use send command all

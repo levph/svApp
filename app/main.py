@@ -29,15 +29,11 @@ app.add_middleware(CORSMiddleware,
  can you access protected devices when passwords are different?
  or just change all function bcast calls who use other IP api?
  how does encryption affect it?
- Refer to "Password protected API" part in manual
- 
- Solve network mapping for radio discovery, better ONVIF discovery, 
- RSSI reports (less latency for SNR), voice recording...
 """
 # global variables
-RADIO_IP = None
-NODE_LIST = None
-IP_LIST = None
+RADIO_IP = None  # string
+NODE_LIST = None  # int
+IP_LIST = None  # strings
 VERSION = None
 CAM_DATA = None
 
@@ -108,6 +104,7 @@ async def start_up():
 async def log_in(credentials: Credentials):
     """
     method to allow log in for locked devices
+    assumes Radio IP is already set
     :param credentials: includes username and password strings
     :return:
     """
@@ -119,7 +116,7 @@ async def log_in(credentials: Credentials):
         if res:
             msg = "Success"
             # update variables after logging in
-            await update_vars()
+            _ = await start_up()
         else:
             msg = "Fail"
         return msg
@@ -149,28 +146,27 @@ async def set_radio_ip(ip: RadioIP):
 async def net_data():
     """
     This method returns global variables
+    assumes at least one radio is connected! will be fixed later
     :return:
     """
     global IP_LIST, NODE_LIST
 
     # TODO: add labels to list
-
-    if IP_LIST and NODE_LIST:
+    try:
+        [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
         ip_id_dict = [{"ip": ip, "id": idd} for ip, idd in zip(IP_LIST, NODE_LIST)]
-
-        snrs = net_status(RADIO_IP, NODE_LIST[:-1])  # N-1 queries is enough to know all SNRs
-
-        # snr_dict = [{"ip1": res[0][0], "ip2": res[0][1], "snr": res[1]} for res in snrs]
+        snrs = []
+        if len(IP_LIST) > 1:
+            snrs = [] if len(IP_LIST) == 1 else net_status(RADIO_IP)
 
         msg = {
             "device-list": ip_id_dict,
             "snr-list": snrs
         }
 
-    else:
-        msg = "Error, no IPS in network"
-
-    return json.dumps({"type": "net-data", "data": msg})
+        return json.dumps({"type": "net-data", "data": msg})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/basic-settings")
@@ -267,11 +263,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Create tasks for different message frequencies
         task1 = asyncio.create_task(send_messages(websocket, 300, get_battery))
-        task2 = asyncio.create_task(send_messages(websocket, 2, update_vars))
+        # task2 = asyncio.create_task(send_messages(websocket, 2, update_vars))
         task3 = asyncio.create_task(send_messages(websocket, 2, net_data))
 
         # Wait for both tasks to complete (they won't, unless there's an error)
-        await asyncio.gather(task1, task2, task3)
+        await asyncio.gather(task1, task3)
 
     except WebSocketDisconnect:
         print("Client disconnected")
@@ -313,3 +309,5 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8080)
+    start_up()
+    net_data()
