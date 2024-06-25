@@ -7,6 +7,15 @@ lock = asyncio.Lock()
 COOKIE = None
 
 
+def exit_session():
+    """
+    Method to zeroize session on application exit
+    :return: nothing lol
+    """
+    global COOKIE
+    COOKIE = None
+
+
 def api_login(un, pw, radio_ip):
     """
     Login function

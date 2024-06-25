@@ -37,6 +37,7 @@ def packet_callback(packet):
     :return: True if the packet is the one we're looking for, False otherwise.
     """
     global radio_ip
+    print("Packet!")
     # print("Packet!!!")
     if packet.haslayer(Ether) and packet.haslayer(IP) and packet.haslayer(UDP):
         src_mac = packet[Ether].src
@@ -80,6 +81,8 @@ def sniff_target_ip():
     Sniffs the network for a target packet and returns the source IP address
     when the packet is found.
     """
+    global radio_ip
+    radio_ip = None
     iface_name = get_iface_name()
     if len(iface_name) == 1:
         sniffer(str(iface_name[0]))

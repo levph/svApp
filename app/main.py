@@ -9,7 +9,7 @@ from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_te
     get_basic_set
 import json
 from requests.exceptions import Timeout
-from utils.send_commands import api_login
+from utils.send_commands import api_login, exit_session
 
 app = FastAPI()
 
@@ -100,6 +100,27 @@ async def start_up():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/log-out")
+def log_out():
+    """
+    Delete type of method to finish current session.
+    will zeroize global variables and finish secure session if it exists
+    :return: string to indicate successful exit
+    """
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, CAM_DATA
+    try:
+        # delete current session data
+        exit_session()
+
+        # delete all global variables
+        RADIO_IP = NODE_LIST = IP_LIST = VERSION = CAM_DATA = None
+
+        return "Success"
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/log-in")
 async def log_in(credentials: Credentials):
     """
@@ -118,6 +139,7 @@ async def log_in(credentials: Credentials):
             # update variables after logging in
             _ = await start_up()
         else:
+            log_out()
             msg = "Fail"
         return msg
 
@@ -134,8 +156,17 @@ async def set_radio_ip(ip: RadioIP):
     """
     global RADIO_IP, NODE_LIST, IP_LIST
     try:
+        # set radio IP to input ip
         RADIO_IP = ip.radio_ip
+
+        # perform startup method (which will test connectivity and update settings)
         res = await start_up()
+
+        if res["type"] == "Fail":
+            # delete current session if wrong IP
+            log_out()
+
+        # return result which can be successful or error
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -185,46 +216,6 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
             return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/get-snrs")
-async def net_stat():
-    """
-    This method will return parameters of network i.e. SNRs between each node
-    :return:
-    """
-    global RADIO_IP, NODE_LIST
-    res = net_status(RADIO_IP, NODE_LIST)
-    return res
-
-
-# TODO: test new changes with devices
-async def update_vars():
-    """
-    routine function to update global variables
-    This method updates global variables such as current radio IP, lists of IP and ID of existing
-    nodes in network
-    :return:
-    """
-    global RADIO_IP, NODE_LIST, IP_LIST
-    valid = 1
-    RADIO_IP = RADIO_IP if RADIO_IP else sniff_target_ip()
-    try:
-        [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
-    except Exception as e:
-        print(e)
-        RADIO_IP, NODE_LIST, IP_LIST = [], [], []
-        print(f"Searching for new connected device...")
-        await start_up()
-        valid = 1 if RADIO_IP else 0
-    else:
-        print(f"Radio IP set to {RADIO_IP}")
-        print(f"Node List set to {NODE_LIST}")
-        print(f"IP List set to {IP_LIST}")
-
-    msg = f"{RADIO_IP} is connected" if valid else f"No Radio is connected"
-    msg = {"type": "update", "data": msg}
-    return json.dumps(msg)
 
 
 @app.get("/get-battery")
@@ -309,5 +300,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8080)
-    start_up()
-    net_data()
