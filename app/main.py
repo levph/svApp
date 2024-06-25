@@ -72,10 +72,10 @@ async def start_up():
                 try:
                     [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
 
-                except Timeout:
+                except (Timeout, TimeoutError):
                     print(f"Request timed out. Make sure computer/radio IP is correct")
                     response["type"] = "Fail"
-                    response["msg"] = "Incorrect Computer IP"
+                    response["msg"] = "Timeout. Incorrect computer/radio IP"
 
                 except Exception as e:
                     if "Authentication error" in e.args[0]:
