@@ -9,7 +9,7 @@ from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_te
     get_basic_set
 import json
 from requests.exceptions import Timeout
-from utils.send_commands import api_login, exit_session
+from utils.send_commands import api_login, exit_session, set_version
 
 app = FastAPI()
 
@@ -34,7 +34,7 @@ app.add_middleware(CORSMiddleware,
 RADIO_IP = None  # string
 NODE_LIST = None  # int
 IP_LIST = None  # strings
-VERSION = None
+VERSION = 5  # assume 5
 CAM_DATA = None
 
 
@@ -45,13 +45,13 @@ async def start_up():
     Updates relevant global variables.
     :return: json with type and msg fields
     """
-    global RADIO_IP, NODE_LIST, IP_LIST
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION
     try:
         response = {"type": None, "msg": None}
 
         try:
             # sniff across interfaces to find Radio Discovery message
-            RADIO_IP = RADIO_IP if RADIO_IP else sniff_target_ip()
+            [RADIO_IP, VERSION] = RADIO_IP if RADIO_IP else sniff_target_ip()
         except Exception as e:
             # If we got an error then most likely there's no connected Radio
             print(f"Can't find connected device\n")
@@ -69,8 +69,9 @@ async def start_up():
 
                 # get list of devices in network
                 print(f"Radio IP set to {RADIO_IP}\n")
+                set_version(VERSION)
                 try:
-                    [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+                    [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
 
                 except (Timeout, TimeoutError):
                     print(f"Request timed out. Make sure computer/radio IP is correct")
@@ -180,11 +181,11 @@ async def net_data():
     assumes at least one radio is connected! will be fixed later
     :return:
     """
-    global IP_LIST, NODE_LIST
+    global IP_LIST, NODE_LIST, VERSION
 
     # TODO: add labels to list
     try:
-        [IP_LIST, NODE_LIST] = list_devices(RADIO_IP)
+        [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
         ip_id_dict = [{"ip": ip, "id": idd} for ip, idd in zip(IP_LIST, NODE_LIST)]
         snrs = []
         if len(IP_LIST) > 1:
@@ -200,6 +201,7 @@ async def net_data():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# TODO: use send_messages tools in this method
 @app.post("/basic-settings")
 async def basic_settings(settings: Optional[BasicSettings] = None):
     """
@@ -207,7 +209,7 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
     """
     try:
         if settings:
-            response = set_basic.set_basic_settings(RADIO_IP, NODE_LIST, settings)
+            response = set_basic.set_basic_settings(RADIO_IP, NODE_LIST, settings, VERSION)
             msg = {"Error"} if "error" in response else {"Success"}
 
             return msg
