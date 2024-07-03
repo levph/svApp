@@ -293,6 +293,7 @@ def set_ptt_groups(ips, num_groups, statuses):
     :param statuses: statuses of each group
     :return:
     """
+
     group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
 
     # methods = ["ptt_mcast_group"] * len(group_ips)

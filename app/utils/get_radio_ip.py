@@ -20,7 +20,7 @@ stop_condition = threading.Condition()
 
 # Define the MAC prefix and IP range
 radio_ip = None
-mac_prefix = "c4:7c:8d"
+mac_prefix = ["c4:7c:8d"]
 ip_range = "172."
 broadcast_mac = "ff:ff:ff:ff:ff:ff"
 
@@ -47,7 +47,7 @@ def packet_callback(packet):
         # Check if the packet is a broadcast
         if dst_mac.lower() == broadcast_mac:
             # Check if the source MAC address matches the prefix and the IP is in the expected range
-            if src_mac.lower().startswith(mac_prefix) and src_ip.startswith(ip_range):
+            if any(src_mac.lower().startswith(prefix) for prefix in mac_prefix) and src_ip.startswith(ip_range):
                 with lock:
                     if radio_ip is None:
                         print(f"Received Silvus discovery message from {src_ip}")
@@ -102,6 +102,6 @@ def sniff_target_ip():
 
 
 if __name__ == "__main__":
-    ip = sniff_target_ip()
+    sniff_target_ip()
 
 # sniff_target_ip()
