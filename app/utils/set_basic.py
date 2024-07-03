@@ -82,8 +82,10 @@ def set_single(radio_ip, f, bw, net_id, power):
     return response.text
 
 
-def send_broadcast(radio_ip, f, bw, net_id, power, nodelist):
+def send_broadcast(radio_ip, f, bw, net_id, power, nodelist, version):
     url = f"http://{radio_ip}/bcast_enc.pyc"
+    if version == 4:
+        url = url[:-1]
 
     payload = json.dumps({
         "apis": [
@@ -157,7 +159,7 @@ def send_broadcast(radio_ip, f, bw, net_id, power, nodelist):
     return response.text
 
 
-def set_basic_settings(radio_ip, nodelist, settings):
+def set_basic_settings(radio_ip, nodelist, settings, version):
     set_net = settings.set_net_flag
     f = str(settings.frequency)
     bw = str(settings.bw)
@@ -165,7 +167,7 @@ def set_basic_settings(radio_ip, nodelist, settings):
     power = str(settings.power_dBm)
 
     if set_net:
-        response = send_broadcast(radio_ip, f, bw, net_id, power, nodelist)
+        response = send_broadcast(radio_ip, f, bw, net_id, power, nodelist, version)
     else:
         response = set_single(radio_ip, f, bw, net_id, power)
 

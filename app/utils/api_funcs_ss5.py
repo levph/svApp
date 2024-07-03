@@ -26,55 +26,63 @@ from utils.send_commands import send_commands_ip, send_net_stat
 #     # set rssi report timing
 #     res2 = send_commands_ip(methods=["rssi_report_period"], radio_ip=ip, params=[["500"]])
 #     lev = 1
+def node_id_to_ip_v4(id_list):
+    last_bytes = [(node // 256, node % 256) for node in id_list]
+    iips = ["172.20." + str(b[0]) + "." + str(b[1]) for b in last_bytes]
+    return iips
 
 
-def node_id_to_ip(nodelist):
+def node_id_to_ip(nodelist, version):
     """
     This method converts node ids to node ips in SW V5
     The network base address is 172.16.0.0.
     node ID is corresponding to last 20 bits of the IP.
     Node IP is essentialy = base_ip + nodeID
 
+    :param version: int version of firmware
     :param nodelist: list of integers indicating network node IDs
     :return: ips: list of corresponding node IPs
     """
     base_ip = "172.16.0.0"
     ips = []
 
-    for node_id in nodelist:
-        # Ensure node_id is within the valid range for a 20-bit number
-        if node_id < 0 or node_id >= (1 << 20):
-            raise ValueError("Node ID must be a 20-bit number (0 to 1048575).")
+    if version == 4:
+        ips = node_id_to_ip_v4(nodelist)
+    else:  # v5
+        for node_id in nodelist:
+            # Ensure node_id is within the valid range for a 20-bit number
+            if node_id < 0 or node_id >= (1 << 20):
+                raise ValueError("Node ID must be a 20-bit number (0 to 1048575).")
 
-        # Convert base IP to binary and extract the network part
-        base_ip_octets = [int(octet) for octet in base_ip.split('.')]
-        base_ip_bin = ''.join(format(octet, '08b') for octet in base_ip_octets)
+            # Convert base IP to binary and extract the network part
+            base_ip_octets = [int(octet) for octet in base_ip.split('.')]
+            base_ip_bin = ''.join(format(octet, '08b') for octet in base_ip_octets)
 
-        # Extract the network prefix (first 12 bits)
-        network_prefix = base_ip_bin[:12]
+            # Extract the network prefix (first 12 bits)
+            network_prefix = base_ip_bin[:12]
 
-        # Convert node ID to a 20-bit binary string
-        node_id_bin = format(node_id, '020b')
+            # Convert node ID to a 20-bit binary string
+            node_id_bin = format(node_id, '020b')
 
-        # Combine the network prefix and the node ID
-        ip_bin = network_prefix + node_id_bin
+            # Combine the network prefix and the node ID
+            ip_bin = network_prefix + node_id_bin
 
-        # Split the 32-bit binary string into four 8-bit segments
-        octets = [ip_bin[i:i + 8] for i in range(0, 32, 8)]
+            # Split the 32-bit binary string into four 8-bit segments
+            octets = [ip_bin[i:i + 8] for i in range(0, 32, 8)]
 
-        # Convert each 8-bit segment to a decimal number
-        ip_address = '.'.join(str(int(octet, 2)) for octet in octets)
+            # Convert each 8-bit segment to a decimal number
+            ip_address = '.'.join(str(int(octet, 2)) for octet in octets)
 
-        ips.append(ip_address)
+            ips.append(ip_address)
 
     return ips
 
 
-def list_devices(s_ip):
+def list_devices(s_ip, version):
     node_ids = send_commands_ip(["routing_tree"], radio_ip=s_ip, params=[[]])
 
     # translate ids of all the nodes to ip
-    ips = node_id_to_ip(node_ids)
+    ips = node_id_to_ip(node_ids, version)
 
     return ips, node_ids
 
@@ -93,7 +101,7 @@ def find_camera_streams_temp(iplist):
     # find connected devices in each node
     for iip in iplist:
         devices = send_commands_ip(["read_client_list"], radio_ip=iip, params=[[]])
-        filtered_devices = [device for device in devices if not device['mac'].startswith('c4:7c:8d')]
+        filtered_devices = [device for device in devices if device['ip'] not in iplist]
         for device in filtered_devices:
             ip = device['ip']
 
@@ -293,6 +301,7 @@ def set_ptt_groups(ips, num_groups, statuses):
     :param statuses: statuses of each group
     :return:
     """
+
     group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
 
     # methods = ["ptt_mcast_group"] * len(group_ips)

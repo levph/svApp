@@ -5,6 +5,12 @@ import asyncio
 lock = asyncio.Lock()
 
 COOKIE = None
+VERSION = None
+
+
+def set_version(version):
+    global VERSION
+    VERSION = version
 
 
 def exit_session():
@@ -12,8 +18,8 @@ def exit_session():
     Method to zeroize session on application exit
     :return: nothing lol
     """
-    global COOKIE
-    COOKIE = None
+    global COOKIE, VERSION
+    COOKIE = VERSION = NONE
 
 
 def api_login(un, pw, radio_ip):
@@ -44,6 +50,8 @@ def send_net_stat(radio_ip, nodelist):
     global COOKIE
 
     url = f'http://{radio_ip}/bcast_enc.pyc'
+    if VERSION == 4:
+        url = url[:-1]  # script has .py suffix in v4
 
     payload = f'{{"apis":[{{"method":"network_status","params":{{}}}}],"nodeids":{nodelist}}}'
 

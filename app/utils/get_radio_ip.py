@@ -20,9 +20,11 @@ stop_condition = threading.Condition()
 
 # Define the MAC prefix and IP range
 radio_ip = None
-mac_prefix = "c4:7c:8d"
+version = None
+mac_prefix = ["c4:7c:8d"]
 ip_range = "172."
 broadcast_mac = "ff:ff:ff:ff:ff:ff"
+dst_ip_v4 = "172.20.255.255"
 
 
 def packet_callback(packet):
@@ -36,22 +38,34 @@ def packet_callback(packet):
     :param x: The packet received by sniff.
     :return: True if the packet is the one we're looking for, False otherwise.
     """
-    global radio_ip
+    global radio_ip, version
     print("Packet!")
     # print("Packet!!!")
     if packet.haslayer(Ether) and packet.haslayer(IP) and packet.haslayer(UDP):
         src_mac = packet[Ether].src
         dst_mac = packet[Ether].dst
         src_ip = packet[IP].src
+        dst_ip = packet[IP].dst
 
-        # Check if the packet is a broadcast
-        if dst_mac.lower() == broadcast_mac:
+        # V4 discovery message
+        if dst_ip == dst_ip_v4 and src_ip.startswith(ip_range):
+            with lock:
+                if radio_ip is None:
+                    print(f"Received V4 Silvus discovery message from {src_ip}")
+                    radio_ip = src_ip
+                    version = 4
+                    with stop_condition:
+                        stop_condition.notify_all()
+
+        # Check if the packet is a broadcast (V5 discovery message)
+        elif dst_mac.lower() == broadcast_mac:
             # Check if the source MAC address matches the prefix and the IP is in the expected range
-            if src_mac.lower().startswith(mac_prefix) and src_ip.startswith(ip_range):
+            if any(src_mac.lower().startswith(prefix) for prefix in mac_prefix) and src_ip.startswith(ip_range):
                 with lock:
                     if radio_ip is None:
-                        print(f"Received Silvus discovery message from {src_ip}")
+                        print(f"Received V5 Silvus discovery message from {src_ip}")
                         radio_ip = src_ip
+                        version = 5
                         with stop_condition:
                             stop_condition.notify_all()
 
@@ -81,8 +95,9 @@ def sniff_target_ip():
     Sniffs the network for a target packet and returns the source IP address
     when the packet is found.
     """
-    global radio_ip
-    radio_ip = None
+    global radio_ip, version
+    radio_ip = version = None
+
     iface_name = get_iface_name()
     if len(iface_name) == 1:
         sniffer(str(iface_name[0]))
@@ -98,10 +113,10 @@ def sniff_target_ip():
             thread.join()
 
     print(f"\nRadio IP is {radio_ip}")
-    return radio_ip
+    return radio_ip, version
 
 
 if __name__ == "__main__":
-    ip = sniff_target_ip()
+    sniff_target_ip()
 
 # sniff_target_ip()
