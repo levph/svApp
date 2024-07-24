@@ -2,14 +2,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional
-from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials
-from utils import set_basic
+from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
-    get_basic_set
+    get_basic_set, set_basic_settings, get_radio_label, set_label_id
 import json
 from requests.exceptions import Timeout
-from utils.send_commands import api_login, exit_session, set_version
+from utils.send_commands import api_login, exit_session, set_version, set_credentials
 
 app = FastAPI()
 
@@ -32,16 +31,17 @@ app.add_middleware(CORSMiddleware,
 """
 # global variables
 RADIO_IP = None  # string
-NODE_LIST = None  # int
-IP_LIST = None  # strings
+NODE_LIST = [None]  # int
+IP_LIST = [None]  # strings
 VERSION = 5  # assume 5
 CAM_DATA = None
+CREDENTIALS = None
 
 
 @app.post("/start-up")
 async def start_up():
     """
-    This method is called from log-in screen. Find radio IP and whether he is protected or not.
+    This method is called from log-in screen. Find radio IP and whether it is protected or not.
     Updates relevant global variables.
     :return: json with type and msg fields
     """
@@ -108,13 +108,15 @@ def log_out():
     will zeroize global variables and finish secure session if it exists
     :return: string to indicate successful exit
     """
-    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, CAM_DATA
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, CAM_DATA, CREDENTIALS
     try:
         # delete current session data
         exit_session()
 
+        NODE_LIST = IP_LIST = [None]
+
         # delete all global variables
-        RADIO_IP = NODE_LIST = IP_LIST = VERSION = CAM_DATA = None
+        RADIO_IP = VERSION = CAM_DATA = CREDENTIALS = None
 
         return "Success"
 
@@ -130,8 +132,11 @@ async def log_in(credentials: Credentials):
     :param credentials: includes username and password strings
     :return:
     """
-    global RADIO_IP
+    global RADIO_IP, CREDENTIALS
     try:
+        CREDENTIALS = credentials
+        set_credentials(credentials)
+
         username = credentials.username
         pw = credentials.password
         res = api_login(username, pw, RADIO_IP)
@@ -173,7 +178,19 @@ async def set_radio_ip(ip: RadioIP):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# TODO: test after encryption update
+@app.post("/set-label")
+async def set_label(node: NodeID):
+    """
+    This method sets label for given device id
+    :return:
+    """
+    global RADIO_IP
+    try:
+        res = set_label_id(RADIO_IP, node.id, node.label)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/net-data")
 async def net_data():
     """
@@ -181,15 +198,29 @@ async def net_data():
     assumes at least one radio is connected! will be fixed later
     :return:
     """
-    global IP_LIST, NODE_LIST, VERSION
+    global IP_LIST, NODE_LIST, VERSION, RADIO_IP
 
-    # TODO: add labels to list
     try:
+
+        # update IPs and Nodes in network
         [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
-        ip_id_dict = [{"ip": ip, "id": idd} for ip, idd in zip(IP_LIST, NODE_LIST)]
+
+        # define initial names as IPs of devices
+        NODE_NAMES = IP_LIST.copy()
+
+        # get existing labels in device flash memory
+        temp_node_names = get_radio_label(RADIO_IP)
+
+        for item in temp_node_names:
+            if item["id"] in NODE_LIST:
+                idx = NODE_LIST.index(item["id"])
+                NODE_NAMES[idx] = item["name"]
+
         snrs = []
         if len(IP_LIST) > 1:
-            snrs = [] if len(IP_LIST) == 1 else net_status(RADIO_IP)
+            snrs = net_status(RADIO_IP)
+
+        ip_id_dict = [{"ip": ip, "id": idd, "name": name} for ip, idd, name in zip(IP_LIST, NODE_LIST, NODE_NAMES)]
 
         msg = {
             "device-list": ip_id_dict,
@@ -201,7 +232,6 @@ async def net_data():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# TODO: use send_messages tools in this method
 @app.post("/basic-settings")
 async def basic_settings(settings: Optional[BasicSettings] = None):
     """
@@ -209,7 +239,7 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
     """
     try:
         if settings:
-            response = set_basic.set_basic_settings(RADIO_IP, NODE_LIST, settings, VERSION)
+            response = set_basic_settings(RADIO_IP, NODE_LIST, settings)
             msg = {"Error"} if "error" in response else {"Success"}
 
             return msg
@@ -227,8 +257,8 @@ async def get_battery():
     :return:
     ips_batteries - list of radio_ip - bettery status
     """
-    global IP_LIST
-    ips_batteries = get_batteries(IP_LIST)
+    global RADIO_IP, NODE_LIST, IP_LIST
+    ips_batteries = get_batteries(RADIO_IP, IP_LIST)
     print("Updated battery status")
     print(ips_batteries)
     return json.dumps({"type": "battery", "data": ips_batteries})
@@ -273,7 +303,8 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/set-ptt-groups")
 async def set_ptt_group(ptt_data: PttData):
     try:
-        response = set_ptt_groups(ptt_data.ips, ptt_data.num_groups, ptt_data.statuses)
+        global RADIO_IP, NODE_LIST
+        response = set_ptt_groups(RADIO_IP, ptt_data.ips, NODE_LIST, ptt_data.num_groups, ptt_data.statuses)
         # TODO: check that response was positive
         return {"message": "ptt group settings set succesfully"}
     except Exception as e:

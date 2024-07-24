@@ -15,17 +15,15 @@ functions to start:
 
 import requests
 import json
+from utils.send_commands import send_commands_ip, api_login, read_from_multiple
 
-from utils.send_commands import send_commands_ip, send_net_stat
+
+def get_radio_label(radio_ip):
+    labels = send_commands_ip(["node_labels"], radio_ip=radio_ip, params=[[]])
+    id_label = [{'id': int(k), 'name': v} for k, v in labels.items()]
+    return id_label
 
 
-# def get_rssi_report(ip):
-#     # enable rssi report
-#     res = send_commands_ip(methods=["rssi_report_address"], radio_ip=ip, params=[["172.20.2.1", "30000"]])
-
-#     # set rssi report timing
-#     res2 = send_commands_ip(methods=["rssi_report_period"], radio_ip=ip, params=[["500"]])
-#     lev = 1
 def node_id_to_ip_v4(id_list):
     last_bytes = [(node // 256, node % 256) for node in id_list]
     iips = ["172.20." + str(b[0]) + "." + str(b[1]) for b in last_bytes]
@@ -239,7 +237,6 @@ def find_camera_streams_temp(iplist):
 #     return 1
 
 
-# TODO: test
 def net_status(radio_ip):
     """
     return devices in network and SNR between them
@@ -275,25 +272,27 @@ def net_status(radio_ip):
         return snr_res
 
     response = send_commands_ip(["streamscape_data"], radio_ip, [[]])
-
     return extract_snr(response)
 
 
-# TODO: test and use send command all
-def get_batteries(ips):
-    # print battery percentage for each
+def get_batteries(radio_ip, radio_ips):
+    """
+    This method returns battery percent for each device in the network
+    :param radio_ips: ips of devices to test
+    :return:
+    """
     percents = []
+    methods = [["battery_percent"] for _ in range(len(radio_ips))]
+    params = [[[]] for _ in range(len(radio_ips))]
 
-    for radio_ip in ips:
-        battery_percentage = send_commands_ip(["battery_percent"], radio_ip=radio_ip, params=[[]])
-        print(f'Radio IP: {radio_ip}, Battery: {battery_percentage[0]}')
-        percents.append(battery_percentage[0])
+    battery_percents = read_from_multiple(radio_ip, radio_ips, methods, params)
 
-    result = [{"ip": ip, "percent": percent} for ip, percent in zip(ips, percents)]
+    result = [{"ip": ip, "percent": percent[0]} for ip, percent in zip(radio_ips, battery_percents)]
     return result
 
 
-def set_ptt_groups(ips, num_groups, statuses):
+# TODO: add frontend option to get existing settings יש אירוע
+def set_ptt_groups(radio_ip, ips, nodelist, num_groups, statuses):
     """
     This method sets ptt group settings for all radios
     :param ips: ips of radios to change group settings
@@ -302,16 +301,11 @@ def set_ptt_groups(ips, num_groups, statuses):
     :return:
     """
 
+    # set group mcast IPs for all radios in network
     group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
-
-    # methods = ["ptt_mcast_group"] * len(group_ips)
-
-    # set groups for all radios
-    for ip in ips:
-        methods = ["ptt_mcast_group"] * len(group_ips)
-        res = send_commands_ip(methods=methods, radio_ip=ip, params=group_ips)
-        # for g in group_ips:
-        #     res = send_commands_ip(["ptt_mcast_group"], ip=ip, params=g)
+    methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle"]
+    params = group_ips + ["ptt_mcast_group"]
+    res = send_commands_ip(methods=methods, radio_ip=radio_ip, params=params, bcast=1, nodelist=nodelist)
 
     ptt_settings = []
 
@@ -338,11 +332,27 @@ def set_ptt_groups(ips, num_groups, statuses):
         ptt_str = '_'.join(arr)
         ptt_settings.append([ptt_str])
 
-    for ii in range(len(ips)):
-        res = send_commands_ip(["ptt_active_mcast_group"], radio_ip=ips[ii], params=[ptt_settings[ii]])
+    for ii in range(len(nodelist)):
+        res = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[ptt_settings[ii]], bcast=1,
+                               nodelist=[nodelist[ii]])
 
     return "Success maybe"
 
+
+def set_label_id(radio_ip, node_id, label):
+
+    current_names = send_commands_ip(["node_labels"], radio_ip, params=[[]])
+    current_names[str(node_id)] = label
+    current_names = json.dumps(current_names)
+    current_names = current_names.replace('"', '\\"')
+    lev=1
+    # "{\"323285\": \"nadav\", \"324042\": \"lev3\"}"
+
+    # Escape the double quotes in the JSON string
+    escaped_json_string = json_string.replace('"', '\\"')
+
+    # Create the final parameter string
+    final_parameter = f'["1", "{escaped_json_string}"]'
 
 def get_basic_set(radio_ip):
     """
@@ -350,17 +360,55 @@ def get_basic_set(radio_ip):
     :param radio_ip:
     :return:
     """
-    methods = ["freq", "bw", "power_dBm", "nw_name"]
-    params = [[]] * 4
+    methods = ["freq", "bw", "power_dBm", "nw_name", "enable_max_power"]
+    params = [[]] * 5
 
     res = send_commands_ip(methods, radio_ip, params)
+
+    enable_max = int(res[4][0])
+
+    power = "enable_max" if enable_max else str(res[2][0])
 
     res = {
         "set_net_flag": [],
         "frequency": float(res[0][0]),
         "bw": float(res[1][0]),
         "net_id": res[3][0],
-        "power_dBm": float(res[2][0])
+        "power_dBm": power
     }
 
     return res
+
+
+def set_basic_settings(radio_ip, nodelist, settings):
+    """
+    This method sets basic settings either for one radio or entire network.
+    Automatically sets max_link_distance to 5000
+    :param radio_ip: radio ip
+    :param nodelist: list of nodes in network
+    :param settings: struct containing freq, bw, net_id and power settings
+    :return:
+    """
+    set_net = settings.set_net_flag
+    f = str(settings.frequency)
+    bw = str(settings.bw)
+    net_id = str(settings.net_id)
+    power = str(settings.power_dBm)
+
+    if power == "enable_max":
+        enable_max = "1"
+        power = "36"
+    else:
+        enable_max = "0"
+
+    methods = ["nw_name", "max_link_distance", "power_dBm", "freq_bw", "enable_max_power"] + ["setenvlinsingle"] * 5
+    params = [[net_id], ["5000"], [power], [f, bw], [enable_max]] + [[name] for name in methods[:5]]
+
+    if set_net:
+        # set settings for entire network
+        response = send_commands_ip(methods=methods, radio_ip=radio_ip, params=params, bcast=1, nodelist=nodelist)
+    else:
+        # set settings only for current radio
+        response = send_commands_ip(methods=methods, radio_ip=radio_ip, params=params)
+
+    return response
