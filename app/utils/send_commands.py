@@ -1,11 +1,155 @@
 import requests
 import json
 import asyncio
+from utils.fa_models import Credentials
+# import paramiko
+import time
+import re
 
 lock = asyncio.Lock()
 
 COOKIE = None
 VERSION = None
+CREDENTIALS = None
+SSH_CLIENT = None
+
+
+# TODO: test
+# def ssh_multiple_commands(ip, command_template, methods, target_ips, response_pattern):
+#     """
+#     This method sends messages via the SSH api!
+#     :param methods:
+#     :param ip: IP of connected device
+#     :param command_template:
+#     :param target_ips:
+#     :param response_pattern:
+#     :return:
+#     """
+#     hostname = ip
+#     password = "root"  # hardcoded pw, sue me
+#     port = 22
+#     username = "root"
+#
+#     ssh_client = paramiko.SSHClient()
+#     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#
+#     try:
+#         ssh_client.connect(hostname, port, username, password, timeout=10)
+#
+#         # Open an interactive shell session
+#         shell = ssh_client.invoke_shell()
+#         time.sleep(1)  # Wait for the shell prompt to appear
+#
+#         # Read the initial prompt
+#         shell.recv(1024).decode('utf-8')
+#
+#         results = []
+#         for method, target_ip in zip(methods, target_ips):
+#             command = command_template.format(target_ip=target_ip, method=method)
+#             shell.send(command + "\n")
+#             time.sleep(2)  # Wait for the command to execute
+#
+#             # Read the command output
+#             output = ""
+#             while True:
+#                 if shell.recv_ready():
+#                     chunk = shell.recv(1024).decode('utf-8')
+#                     output += chunk
+#                     time.sleep(0.5)  # Adjust sleep time if necessary
+#                     # Check if the expected pattern is in the output
+#                     match = re.search(response_pattern, output)
+#                     if match:
+#                         percent = match.group(1)
+#                         results.append(percent)
+#                         break
+#                 else:
+#                     break
+#
+#         ssh_client.close()
+#
+#         return results
+#
+#     except Exception as e:
+#         return "Error"
+
+
+# TODO: handle failed devices and test
+def read_from_multiple(radio_ip, radio_ips, methods, params):
+    """
+    when needed to read from multiple devices, due to device limitations, we need to send messages
+    to each device separately.
+    :param radio_ip: ip of connected radio
+    :param params: list of lists, params for each radio
+    :param radio_ips:
+    :param methods: list of lists, methods for each radio
+    :return:
+    """
+    global COOKIE, CREDENTIALS
+
+    # save current session's cookie
+    cached_cookie = COOKIE
+
+    # set relevant flags
+    success_flag = True
+    auth_flag = True if CREDENTIALS else False
+    results = [None] * len(radio_ips)
+    failed_ips = []
+
+    # send messages to each device
+    for ii, ip in enumerate(radio_ips):
+
+        # if original device is password protected, assume all other devices are too
+        if auth_flag:
+            res = api_login(CREDENTIALS.username, CREDENTIALS.password,
+                            ip)  # also updates session cookie, works for unlocked devices
+            if not res:
+                success_flag = False  # need to perform slower SSH broadcast
+                failed_ips.append(ip)
+                # results.append("-1")  # TODO: add option for global fail format
+                continue
+        try:
+            result = send_commands_ip(methods[ii], radio_ip=ip, params=params[ii])
+        except Exception as e:
+            if "Authentication error" in e.args[0]:
+                # Encountered a password protected device.
+                success_flag = False
+                failed_ips.append(ip)
+                result = None
+            else:
+                raise RuntimeError(f"An error occurred: {e}")
+
+        if auth_flag:
+            exit_session()
+        results[ii] = result
+
+    # for now only when one command to all devices, and no params
+    if not success_flag:
+        # perform ssh broadcasting for failed ips... for now nothing
+        indices = [radio_ips.index(iip) for iip in failed_ips]
+        failed_methods = [methods[ii][0] for ii in indices]
+        failed_params = [params[ii] for ii in indices]
+        # SSH details for the main connection
+
+        command_template = "api {target_ip} {method}"
+
+        # Regular expression template to extract the percent value
+        response_pattern = r'\["(\d+\.\d+)"\]'
+
+        # Run the command on multiple target IPs
+        # ssh_result = ssh_multiple_commands(radio_ip, command_template, failed_methods, failed_ips,
+        #                                        response_pattern)
+        for ii, idx in enumerate(indices):
+            # results[idx] = ssh_result[ii]
+            results[idx] = 'nan'
+
+    # restore original session
+    COOKIE = cached_cookie
+    return results
+
+
+def set_credentials(credentials: Credentials):
+    global CREDENTIALS
+    CREDENTIALS = credentials
 
 
 def set_version(version):
@@ -18,8 +162,9 @@ def exit_session():
     Method to zeroize session on application exit
     :return: nothing lol
     """
-    global COOKIE, VERSION
-    COOKIE = VERSION = NONE
+    global COOKIE, VERSION, CREDENTIALS
+    COOKIE = VERSION = None
+    CREDENTIALS = Credentials
 
 
 def api_login(un, pw, radio_ip):
@@ -67,7 +212,7 @@ def send_net_stat(radio_ip, nodelist):
     return response
 
 
-def send_commands_ip(methods, radio_ip, params=None, timeout=None):
+def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, timeout=None):
     """
     Method able to send one command or multiple to one radio.
     Including error handling
@@ -76,36 +221,72 @@ def send_commands_ip(methods, radio_ip, params=None, timeout=None):
     :param params: list of params for each method, if no params list of []
     :return: result!
     """
-    global COOKIE
-    command_list = [{
-        "jsonrpc": "2.0",
-        "method": methods[i],
-        "id": i,
-        "params": params[i]
+    global COOKIE, VERSION
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    if bcast:
 
-    } for i in range(len(methods))]
+        command_list = [{
+            "method": methods[i],
+            "params": params[i]
 
-    payload = json.dumps(command_list if len(methods) > 1 else command_list[0])
-    if methods[0] == "streamscape_data" or len(methods) > 1:
-        api_endpoint = f"http://{radio_ip}/cgi-bin/streamscape_api"
+        } for i in range(len(methods))]
+
+        payload = json.dumps({
+            "apis": [
+                {
+                    "method": "deferred_execution_api",
+                    "params": {
+                        "version": "1",
+                        "sleep": "0",
+                        "api_list": command_list
+                    }
+                }
+            ],
+            "nodeids": nodelist
+        })
+        api_endpoint = f"http://{radio_ip}/bcast_enc.pyc"
+        if VERSION == 4:
+            api_endpoint = api_endpoint[:-1]  # script has .py suffix in v4
+
     else:
-        api_endpoint = f"http://{radio_ip}/streamscape_api"
+
+        command_list = [{
+            "jsonrpc": "2.0",
+            "method": methods[i],
+            "id": i,
+            "params": params[i]
+
+        } for i in range(len(methods))]
+
+        payload = json.dumps(command_list if len(methods) > 1 else command_list[0])
+        if methods[0] == "streamscape_data" or len(methods) > 1:
+            api_endpoint = f"http://{radio_ip}/cgi-bin/streamscape_api"
+        else:
+            api_endpoint = f"http://{radio_ip}/streamscape_api"
 
     try:
-        response = requests.post(api_endpoint, payload, timeout=10, cookies=COOKIE)
+        response = requests.post(api_endpoint, payload, headers=headers, timeout=10, cookies=COOKIE)
         # response = requests.post(api_endpoint, payload, timeout=10, cookies=COOKIE)
 
         response.raise_for_status()  # Raise an exception for HTTP errors
         temp_cookie = response.cookies
+
         response = response.json()
 
+        # TODO: test what errors bcast returns
         # check if there's an internal silvus error
         if 'error' in response:
             raise RuntimeError(f"Silvus error {response['error']['code']}: {response['error']['message']}")
 
         # save cookie if all else was succesfull 
         COOKIE = temp_cookie
-        response = (response['result'] if len(methods) == 1 else [res['result'] for res in response])
+        # TODO: check how to parse bcast result
+        if methods[0] == "save_node_labels_flash":
+            response = "Success"
+        elif not bcast:
+            response = (response['result'] if len(methods) == 1 else [res['result'] for res in response])
 
         return response  # return the content
 
@@ -113,29 +294,5 @@ def send_commands_ip(methods, radio_ip, params=None, timeout=None):
         raise TimeoutError("The request timed out")
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"An error occurred: {e}")
-
-
-def send_command_ip(method, ip, params=None):
-    """
-    Deprecated method to send only one command to given ip
-    :param method: name of method
-    :param ip: ip of device
-    :param params: parameters
-    :return: result
-    """
-    payload = {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params or [],
-        "id": "1"
-    }
-    api_endpoint = f'http://{ip}/streamscape_api'
-
-    try:
-        response = requests.post(api_endpoint, json=payload, timeout=10)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        return response.json()['result']  # Return the content if successful
-    except requests.exceptions.Timeout:
-        raise TimeoutError("The request timed out")
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"An error occurred: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Unknown error: {e}")
