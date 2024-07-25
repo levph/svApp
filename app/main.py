@@ -35,6 +35,8 @@ app.add_middleware(CORSMiddleware,
 RADIO_IP = None  # string
 NODE_LIST = [None]  # int
 IP_LIST = [None]  # strings
+NODE_NAMES = [None]
+STATUSIM = [None]
 VERSION = 5  # assume 5
 CAM_DATA = None
 CREDENTIALS = None
@@ -47,7 +49,7 @@ async def start_up():
     Updates relevant global variables.
     :return: json with type and msg fields
     """
-    global RADIO_IP, NODE_LIST, IP_LIST, VERSION
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM
     try:
         response = {"type": None, "msg": None}
 
@@ -74,6 +76,12 @@ async def start_up():
                 set_version(VERSION)
                 try:
                     [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
+
+                    # names are not dynamic, saved in device flash
+                    NODE_NAMES = get_radio_label(RADIO_IP)
+
+                    STATUSIM = get_ptt_groups(IP_LIST, NODE_LIST, NODE_NAMES)
+                    lev = 1
 
                 except (Timeout, TimeoutError):
                     print(f"Request timed out. Make sure computer/radio IP is correct")
@@ -201,29 +209,28 @@ async def net_data():
     assumes at least one radio is connected! will be fixed later
     :return:
     """
-    global IP_LIST, NODE_LIST, VERSION, RADIO_IP
+    global IP_LIST, NODE_LIST, VERSION, RADIO_IP, NODE_NAMES, STATUSIM
 
     try:
+
+        old_ip_list = IP_LIST.copy()
 
         # update IPs and Nodes in network
         [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
 
-        # define initial names as IPs of devices
-        NODE_NAMES = IP_LIST.copy()
+        if IP_LIST != old_ip_list:
+            new_ips, new_ids = zip(*[(ip, iid) for ip, iid in zip(IP_LIST, NODE_LIST) if ip not in old_ip_list])
+            new_ips, new_ids = list(new_ips), list(new_ids)
 
-        # get existing labels in device flash memory
-        temp_node_names = get_radio_label(RADIO_IP)
+            new_statusim = get_ptt_groups(new_ips, new_ids, NODE_NAMES)
 
-        for item in temp_node_names:
-            if item["id"] in NODE_LIST:
-                idx = NODE_LIST.index(item["id"])
-                NODE_NAMES[idx] = item["name"]
+            STATUSIM = [status for status in STATUSIM if status["ip"] in IP_LIST] + new_statusim
 
         snrs = []
         if len(IP_LIST) > 1:
             snrs = net_status(RADIO_IP)
 
-        ip_id_dict = [{"ip": ip, "id": idd, "name": name} for ip, idd, name in zip(IP_LIST, NODE_LIST, NODE_NAMES)]
+        ip_id_dict = STATUSIM
 
         msg = {
             "device-list": ip_id_dict,
@@ -316,7 +323,13 @@ async def get_ptt_group():
 @app.post("/set-ptt-groups")
 async def set_ptt_group(ptt_data: PttData):
     try:
-        global RADIO_IP, NODE_LIST
+        global RADIO_IP, NODE_LIST, STATUSIM
+
+        # update STATUSIM global var
+        for status in STATUSIM:
+            if status["ip"] in ptt_data.ips:
+                status["status"] = ptt_data.statuses[ptt_data.ips.index(status["ip"])]
+
         response = set_ptt_groups(RADIO_IP, ptt_data.ips, NODE_LIST, ptt_data.num_groups, ptt_data.statuses)
         # TODO: check that response was positive
         return {"message": "ptt group settings set succesfully"}

@@ -276,10 +276,14 @@ def send_save_node_label(radio_ip, label_string, nodelist):
         raise RuntimeError(f"Unknown error: {e}")
 
 
+# TODO: test all functions
 def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, timeout=None):
     """
     Method able to send one command or multiple to one radio.
     Including error handling
+    :param timeout:
+    :param nodelist:
+    :param bcast:
     :param methods: list(str) of method names
     :param radio_ip: str of radio ip
     :param params: list of params for each method, if no params list of []
@@ -374,5 +378,5 @@ if __name__ == "__main__":
     label_string_inner = f'"{nodeids[0]}": "{names[0]}"'
     label_string = '{' + label_string_inner + '}'
     # label_string = '{"324042": "hsdai", "323285": "lev"}'
-    res=send_save_node_label("172.20.241.202", label_string, [323285, 324042])
+    res = send_save_node_label("172.20.241.202", label_string, [323285, 324042])
     print(res)

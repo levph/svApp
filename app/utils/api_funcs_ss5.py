@@ -20,7 +20,12 @@ from utils.send_commands import send_commands_ip, api_login, read_from_multiple,
 
 def get_radio_label(radio_ip):
     labels = send_commands_ip(["node_labels"], radio_ip=radio_ip, params=[[]])
-    id_label = [{'id': int(k), 'name': v} for k, v in labels.items()]
+    # id_label = [{'id': int(k), 'name': v} for k, v in labels.items()]
+
+    ids, names = zip(*[(int(k), v) for k, v in labels.items()])
+
+    id_label = {"ids": ids, "names": names}
+
     return id_label
 
 
@@ -291,7 +296,7 @@ def get_batteries(radio_ip, radio_ips):
     return result
 
 
-def get_ptt_groups(ips):
+def get_ptt_groups(ips, ids, names):
     group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(15)]
     statuses = [[] for _ in range(len(ips))]
     global_max_group = 0
@@ -314,10 +319,19 @@ def get_ptt_groups(ips):
                 # should not get here
             else:  # inactive or does not exist
                 statuses[radio_index].append(0)
-    return {'num_groups': max_group, 'ips': ips, 'statuses': statuses}
+
+    res = []
+    for ip, iid, status in zip(ips, ids, statuses):
+        if iid in names["ids"]:
+            name = names["names"][names["ids"].index(iid)]
+        else:
+            name = ip
+        res.append({"ip": ip, "id": iid, "status": status, "name": name})
+
+    return res
+    # return {'num_groups': max_group, 'ips': ips, 'statuses': statuses}
 
 
-# TODO: add frontend option to get existing settings יש אירוע
 def set_ptt_groups(radio_ip, ips, nodelist, num_groups, statuses):
     """
     This method sets ptt group settings for all radios
@@ -366,7 +380,6 @@ def set_ptt_groups(radio_ip, ips, nodelist, num_groups, statuses):
 
 
 def set_label_id(radio_ip, node_id, label, nodelist):
-
     # get names saved in radio who's ip is radio_ip
     current_names = send_commands_ip(["node_labels"], radio_ip, params=[[]])
 
@@ -379,10 +392,7 @@ def set_label_id(radio_ip, node_id, label, nodelist):
     # use designated api method
     res = send_save_node_label(radio_ip, current_names, nodelist)
 
-    return res[0][0]['result']==['']
-
-
-
+    return res[0][0]['result'] == ['']
 
 
 def get_basic_set(radio_ip):
