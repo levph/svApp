@@ -27,6 +27,11 @@ class PttData(BaseModel):
     statuses: list[list[int]]
 
 
+class NodeID(BaseModel):
+    id: int
+    label: str
+
+
 class Credentials(BaseModel):
     username: str
     password: str
@@ -37,7 +42,7 @@ class BasicSettings(BaseModel):
     frequency: float
     bw: str
     net_id: str
-    power_dBm: int
+    power_dBm: str
 
 
 class RadioIP(BaseModel):
