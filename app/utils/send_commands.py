@@ -212,6 +212,70 @@ def send_net_stat(radio_ip, nodelist):
     return response
 
 
+def send_save_node_label(radio_ip, label_string, nodelist):
+    """
+    Specific method for setting node labels in flash
+    :param label_string:
+    :param radio_ip:
+    :param params:
+    :param nodelist:
+    :return:
+    """
+    global COOKIE
+
+    api_endpoint = f"http://{radio_ip}/bcast_enc.pyc"
+    if VERSION == 4:
+        api_endpoint = api_endpoint[:-1]
+
+    api_list = [
+        {
+            "method": "save_node_labels_flash",
+            "params": ["1", label_string]
+        }
+    ]
+
+    payload = json.dumps({
+        "apis": [
+            {
+                "method": "deferred_execution_api",
+                "params": {
+                    "version": "1",
+                    "sleep": "0",
+                    "api_list": api_list
+                }
+            }
+        ],
+        "nodeids": nodelist,
+        "override": 1
+    })
+
+    try:
+        response = requests.post(api_endpoint, payload, timeout=10, cookies=COOKIE)
+        # response = requests.post(api_endpoint, payload, timeout=10, cookies=COOKIE)
+        if "JSONDecodeError" in response.text:
+            return "JsonDecodeError"
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        temp_cookie = response.cookies
+
+        response = response.json()
+
+        # check if there's an internal silvus error
+        if 'error' in response:
+            raise RuntimeError(f"Silvus error {response['error']['code']}: {response['error']['message']}")
+
+        # save cookie if all else was succesfull
+        COOKIE = temp_cookie
+
+        return response  # return the content
+
+    except requests.exceptions.Timeout:
+        raise TimeoutError("The request timed out")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"An error occurred: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Unknown error: {e}")
+
+
 def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, timeout=None):
     """
     Method able to send one command or multiple to one radio.
@@ -237,7 +301,7 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
             "apis": [
                 {
                     "method": "deferred_execution_api",
-                    "param": {
+                    "params": {
                         "version": "1",
                         "sleep": "0",
                         "api_list": command_list
@@ -246,6 +310,7 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
             ],
             "nodeids": nodelist
         })
+
         api_endpoint = f"http://{radio_ip}/bcast_enc.pyc"
         if VERSION == 4:
             api_endpoint = api_endpoint[:-1]  # script has .py suffix in v4
@@ -283,9 +348,7 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
         # save cookie if all else was succesfull 
         COOKIE = temp_cookie
         # TODO: check how to parse bcast result
-        if methods[0] == "save_node_labels_flash":
-            response = "Success"
-        elif not bcast:
+        if not bcast:
             response = (response['result'] if len(methods) == 1 else [res['result'] for res in response])
 
         return response  # return the content
@@ -296,3 +359,20 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
         raise RuntimeError(f"An error occurred: {e}")
     except Exception as e:
         raise RuntimeError(f"Unknown error: {e}")
+
+
+if __name__ == "__main__":
+    # = "{\\\"323285\\\": \\\"lev100\\\"}"
+
+    # label_string = '{\\"323285\\": \\"lev1131\\"}'
+
+    # param = ["1", '{\\"323285\\": \\"lev1131\\"}']
+    # send_commands_ip(["save_node_labels_flash"], "172.20.238.213", params=[param], bcast=1, nodelist=[323285])
+    # label_string = {"32": "lev1131"}
+    nodeids = [324042, 323285]
+    names = ["yotam", "hahomo"]
+    label_string_inner = f'"{nodeids[0]}": "{names[0]}"'
+    label_string = '{' + label_string_inner + '}'
+    # label_string = '{"324042": "hsdai", "323285": "lev"}'
+    res=send_save_node_label("172.20.241.202", label_string, [323285, 324042])
+    print(res)

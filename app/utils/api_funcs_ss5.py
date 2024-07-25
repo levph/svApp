@@ -15,7 +15,7 @@ functions to start:
 
 import requests
 import json
-from utils.send_commands import send_commands_ip, api_login, read_from_multiple
+from utils.send_commands import send_commands_ip, api_login, read_from_multiple, send_save_node_label
 
 
 def get_radio_label(radio_ip):
@@ -365,19 +365,24 @@ def set_ptt_groups(radio_ip, ips, nodelist, num_groups, statuses):
     return "Success maybe"
 
 
-def set_label_id(radio_ip, node_id, label):
+def set_label_id(radio_ip, node_id, label, nodelist):
+
+    # get names saved in radio who's ip is radio_ip
     current_names = send_commands_ip(["node_labels"], radio_ip, params=[[]])
+
+    # change label of node_id
     current_names[str(node_id)] = label
+
+    # convert to acceptable format
     current_names = json.dumps(current_names)
-    current_names = current_names.replace('"', '\\"')
-    lev = 1
-    # "{\"323285\": \"nadav\", \"324042\": \"lev3\"}"
 
-    # Escape the double quotes in the JSON string
-    escaped_json_string = json_string.replace('"', '\\"')
+    # use designated api method
+    res = send_save_node_label(radio_ip, current_names, nodelist)
 
-    # Create the final parameter string
-    final_parameter = f'["1", "{escaped_json_string}"]'
+    return res[0][0]['result']==['']
+
+
+
 
 
 def get_basic_set(radio_ip):
@@ -441,5 +446,4 @@ def set_basic_settings(radio_ip, nodelist, settings):
 
 
 if __name__ == "__main__":
-    res=get_ptt_groups(["172.20.238.213", "172.20.241.202"])
-    print(res)
+    set_label_id("172.20.238.213", 324042, "maze")

@@ -186,9 +186,10 @@ async def set_label(node: NodeID):
     This method sets label for given device id
     :return:
     """
-    global RADIO_IP
+    global RADIO_IP, NODE_LIST
     try:
-        res = set_label_id(RADIO_IP, node.id, node.label)
+        res = set_label_id(RADIO_IP, node.id, node.label, NODE_LIST)
+        return {"Success"} if res else {"Fail"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
