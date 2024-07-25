@@ -81,7 +81,7 @@ def send_commands_ip(methods, radio_ip, params=None, timeout=None):
         "jsonrpc": "2.0",
         "method": methods[i],
         "id": i,
-        "params": params[i]
+        "param": params[i]
 
     } for i in range(len(methods))]
 

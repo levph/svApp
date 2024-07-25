@@ -295,26 +295,30 @@ def get_batteries(ips):
 
 def get_ptt_groups(ips):
     group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(15)]
-    statuses = [[]]
-    max_group = 0
+    statuses = [[] for _ in range(len(ips))]
+    global_max_group = 0
     for radio_index, radio_ip in enumerate(ips):
-        ptt_groups = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[])
+        ptt_groups = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[[]])[0]
         states = ptt_groups.split('_')
         listen = states[0].split(',')
         talk = states[1].split(',')
-        monitor = states[2].split(',')
-        for i in range(15):
-            if i in listen or i in talk or i in monitor:
-                max_group = max(max_group, i)
-            if i in listen:
-                if i in talk:  # active
+
+        monitor = [] if len(states) < 3 else states[2].split(',')
+        max_group = int(max(listen+talk+monitor))+1
+        global_max_group = max(max_group,global_max_group)
+        for i in range(max_group):
+            str_i = str(i)
+            if str_i in listen:
+                if str_i in talk:  # active
                     statuses[radio_index].append(1)
-                elif i in monitor:  # monitor
+                elif str_i in monitor:  # monitor
                     statuses[radio_index].append(2)
                 # should not get here
             else:  # inactive or does not exist
                 statuses[radio_index].append(0)
     return {'num_groups': max_group,'ips':ips, 'statuses': statuses}
+
+
 def set_ptt_groups(ips, num_groups, statuses):
     """
     This method sets ptt group settings for all radios
@@ -386,3 +390,7 @@ def get_basic_set(radio_ip):
     }
 
     return res
+
+
+if __name__ == "__main__":
+    get_ptt_groups(["172.20.238.213", "172.20.241.202"])
