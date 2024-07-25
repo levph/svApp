@@ -438,3 +438,8 @@ def set_basic_settings(radio_ip, nodelist, settings):
         response = send_commands_ip(methods=methods, radio_ip=radio_ip, params=params)
 
     return response
+
+
+if __name__ == "__main__":
+    res=get_ptt_groups(["172.20.238.213", "172.20.241.202"])
+    print(res)

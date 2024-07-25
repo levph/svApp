@@ -2,10 +2,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional
+
+import utils.api_funcs_ss5
 from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
-    get_basic_set, set_basic_settings, get_radio_label, set_label_id
+    get_basic_set, set_basic_settings, get_radio_label, set_label_id, get_ptt_groups
 import json
 from requests.exceptions import Timeout
 from utils.send_commands import api_login, exit_session, set_version, set_credentials
@@ -298,6 +300,16 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"Error: {e}")
     finally:
         await websocket.close()
+
+
+@app.post("/get-ptt-groups")
+async def get_ptt_group():
+    try:
+        global IP_LIST
+        ptt_groups = get_ptt_groups(IP_LIST)
+        return ptt_groups
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/set-ptt-groups")
