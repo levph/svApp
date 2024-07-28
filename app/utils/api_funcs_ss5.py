@@ -454,6 +454,3 @@ def set_basic_settings(radio_ip, nodelist, settings):
 
     return response
 
-
-if __name__ == "__main__":
-    set_label_id("172.20.238.213", 324042, "maze")

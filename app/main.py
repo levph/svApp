@@ -41,9 +41,12 @@ VERSION = 5  # assume 5
 CAM_DATA = None
 CREDENTIALS = None
 
+# Create a lock
+lock = asyncio.Lock()
+
 
 @app.post("/start-up")
-async def start_up():
+def start_up():
     """
     This method is called from log-in screen. Find radio IP and whether it is protected or not.
     Updates relevant global variables.
@@ -75,6 +78,7 @@ async def start_up():
                 print(f"Radio IP set to {RADIO_IP}\n")
                 set_version(VERSION)
                 try:
+
                     [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
 
                     # names are not dynamic, saved in device flash
@@ -120,6 +124,7 @@ def log_out():
     """
     global RADIO_IP, NODE_LIST, IP_LIST, VERSION, CAM_DATA, CREDENTIALS
     try:
+
         # delete current session data
         exit_session()
 
@@ -135,7 +140,7 @@ def log_out():
 
 
 @app.post("/log-in")
-async def log_in(credentials: Credentials):
+def log_in(credentials: Credentials):
     """
     method to allow log in for locked devices
     assumes Radio IP is already set
@@ -153,7 +158,7 @@ async def log_in(credentials: Credentials):
         if res:
             msg = "Success"
             # update variables after logging in
-            _ = await start_up()
+            _ = start_up()
         else:
             log_out()
             msg = "Fail"
@@ -164,7 +169,7 @@ async def log_in(credentials: Credentials):
 
 
 @app.post("/set-radio-ip")
-async def set_radio_ip(ip: RadioIP):
+def set_radio_ip(ip: RadioIP):
     """
     set radio ip
     :param ip:
@@ -176,7 +181,7 @@ async def set_radio_ip(ip: RadioIP):
         RADIO_IP = ip.radio_ip
 
         # perform startup method (which will test connectivity and update settings)
-        res = await start_up()
+        res = start_up()
 
         if res["type"] == "Fail":
             # delete current session if wrong IP
@@ -189,7 +194,7 @@ async def set_radio_ip(ip: RadioIP):
 
 
 @app.post("/set-label")
-async def set_label(node: NodeID):
+def set_label(node: NodeID):
     """
     This method sets label for given device id
     :return:
@@ -212,25 +217,29 @@ async def net_data():
     global IP_LIST, NODE_LIST, VERSION, RADIO_IP, NODE_NAMES, STATUSIM
 
     try:
+        async with lock:
+            old_ip_list = IP_LIST.copy()
 
-        old_ip_list = IP_LIST.copy()
+            # update IPs and Nodes in network
+            [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
+            new_ips = new_ids = []
+            if set(IP_LIST) != set(old_ip_list):
+                new_ips, new_ids = zip(*[(ip, iid) for ip, iid in zip(IP_LIST, NODE_LIST) if ip not in old_ip_list])
+                new_ips, new_ids = list(new_ips), list(new_ids)
 
-        # update IPs and Nodes in network
-        [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
+                new_statusim = []
+                if new_ips:
+                    new_statusim = get_ptt_groups(new_ips, new_ids, NODE_NAMES)
 
-        if IP_LIST != old_ip_list:
-            new_ips, new_ids = zip(*[(ip, iid) for ip, iid in zip(IP_LIST, NODE_LIST) if ip not in old_ip_list])
-            new_ips, new_ids = list(new_ips), list(new_ids)
+                STATUSIM = [status for status in STATUSIM if status["ip"] in IP_LIST] + new_statusim
 
-            new_statusim = get_ptt_groups(new_ips, new_ids, NODE_NAMES)
+                new_ips = new_ids = new_statusim = []
 
-            STATUSIM = [status for status in STATUSIM if status["ip"] in IP_LIST] + new_statusim
+            snrs = []
+            if len(IP_LIST) > 1:
+                snrs = net_status(RADIO_IP)
 
-        snrs = []
-        if len(IP_LIST) > 1:
-            snrs = net_status(RADIO_IP)
-
-        ip_id_dict = STATUSIM
+            ip_id_dict = STATUSIM
 
         msg = {
             "device-list": ip_id_dict,
@@ -249,7 +258,9 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
     """
     try:
         if settings:
-            response = set_basic_settings(RADIO_IP, NODE_LIST, settings)
+            async with lock:
+                response = set_basic_settings(RADIO_IP, NODE_LIST, settings)
+
             msg = {"Error"} if "error" in response else {"Success"}
 
             return msg
@@ -268,7 +279,9 @@ async def get_battery():
     ips_batteries - list of radio_ip - bettery status
     """
     global RADIO_IP, NODE_LIST, IP_LIST
+
     ips_batteries = get_batteries(RADIO_IP, IP_LIST)
+
     print("Updated battery status")
     print(ips_batteries)
     return json.dumps({"type": "battery", "data": ips_batteries})
@@ -313,15 +326,16 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/get-ptt-groups")
 async def get_ptt_group():
     try:
-        global IP_LIST
-        ptt_groups = get_ptt_groups(IP_LIST)
+        async with lock:
+            global IP_LIST
+            ptt_groups = get_ptt_groups(IP_LIST)
         return ptt_groups
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/set-ptt-groups")
-async def set_ptt_group(ptt_data: PttData):
+def set_ptt_group(ptt_data: PttData):
     try:
         global RADIO_IP, NODE_LIST, STATUSIM
 
