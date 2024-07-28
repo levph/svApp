@@ -2,9 +2,6 @@ import requests
 import json
 import asyncio
 from utils.fa_models import Credentials
-# import paramiko
-import time
-import re
 
 lock = asyncio.Lock()
 

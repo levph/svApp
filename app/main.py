@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional
 
-import utils.api_funcs_ss5
 from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \

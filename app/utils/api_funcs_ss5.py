@@ -15,7 +15,7 @@ functions to start:
 
 import requests
 import json
-from utils.send_commands import send_commands_ip, api_login, read_from_multiple, send_save_node_label
+from utils.send_commands import send_commands_ip, read_from_multiple, send_save_node_label
 
 
 def get_radio_label(radio_ip):
