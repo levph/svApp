@@ -4,7 +4,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional
-from fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID
+from fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID, Interval
 import json
 from requests.exceptions import Timeout
 
@@ -30,6 +30,8 @@ STATUSIM = [None]
 VERSION = 5  # assume 5
 CAM_DATA = None
 CREDENTIALS = None
+BAT_INTERVAL = 300
+DATA_INTERVAL = 2
 
 # Create a lock
 lock = asyncio.Lock()
@@ -150,6 +152,12 @@ def set_radio_ip(ip: RadioIP):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/change-interval")
+def change_interval(interval: Interval):
+    global DATA_INTERVAL
+    DATA_INTERVAL = interval.interval
+
+
 @app.post("/set-label")
 def set_label(node: NodeID):
     """
@@ -179,10 +187,10 @@ async def net_data():
         snrs = [
             {
                 "id1": str(NODE_LIST[i]),
-                "id2": str(NODE_LIST[i+1]),
+                "id2": str(NODE_LIST[i + 1]),
                 "snr": random.randint(80, 100)
             }
-            for i in range(len(NODE_LIST)-1)
+            for i in range(len(NODE_LIST) - 1)
         ]
 
         ip_id_dict = STATUSIM
@@ -245,9 +253,11 @@ async def get_battery():
 
 async def send_messages(websocket: WebSocket, interval, func):
     """Send messages every 'interval' seconds."""
+    global BAT_INTERVAL, DATA_INTERVAL
     while True:
         res = await func()
         await websocket.send_text(f"{res}")
+        interval = BAT_INTERVAL if func == get_battery else DATA_INTERVAL
         await asyncio.sleep(interval)
 
 
