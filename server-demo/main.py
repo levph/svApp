@@ -1,3 +1,5 @@
+import random
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -45,36 +47,22 @@ def start_up():
         response = {"type": None, "msg": None}
         [RADIO_IP, VERSION] = ["172.20.238.213", 4]
 
-        [IP_LIST, NODE_LIST] = [["172.20.238.213", "172.20.241.202", "172.20.123.123", "172.20.101.112"], [65535, 64433, 65534, 65533]]
+        [IP_LIST, NODE_LIST] = [["172.20.238.213", "172.20.241.202", "172.20.123.123", "172.20.101.112",
+                                 "172.20.104.185", "172.20.48.44", "172.20.227.29", "172.20.248.181",
+                                 "172.20.6.43", "172.20.143.68"],
+                                [65535, 64433, 65534, 65533, 17452, 37558, 40767, 57001, 60757, 63726]]
 
         # names are not dynamic, saved in device flash
-        NODE_NAMES = {"ids": NODE_LIST, "names": ["radio1", "radio2", "radio3", "radio4"]}
+        NODE_NAMES = {"ids": NODE_LIST, "names": [f"radio{i}" for i in range(len(IP_LIST))]}
 
         STATUSIM = [
             {
-                "ip": IP_LIST[0],
-                "id": NODE_LIST[0],
+                "ip": IP_LIST[i],
+                "id": NODE_LIST[i],
                 "status": [1] + [0] * 15,
-                "name": NODE_NAMES["names"][0]
-            },
-            {
-                "ip": IP_LIST[1],
-                "id": NODE_LIST[1],
-                "status": [1] + [0] * 15,
-                "name": NODE_NAMES["names"][1]
-            },
-            {
-                "ip": IP_LIST[2],
-                "id": NODE_LIST[2],
-                "status": [1] + [0] * 15,
-                "name": NODE_NAMES["names"][2]
-            },
-            {
-                "ip": IP_LIST[1],
-                "id": NODE_LIST[1],
-                "status": [1] + [0] * 15,
-                "name": NODE_NAMES["names"][2]
+                "name": NODE_NAMES["names"][i]
             }
+            for i in range(len(IP_LIST))
         ]
 
         response["type"] = "Success"
@@ -190,20 +178,11 @@ async def net_data():
 
         snrs = [
             {
-                "id1": str(NODE_LIST[0]),
-                "id2": str(NODE_LIST[1]),
-                "snr": 100
-            },
-            {
-                "id1": str(NODE_LIST[1]),
-                "id2": str(NODE_LIST[2]),
-                "snr": 100
-            },
-            {
-                "id1": str(NODE_LIST[2]),
-                "id2": str(NODE_LIST[3]),
-                "snr": 100
+                "id1": str(NODE_LIST[i]),
+                "id2": str(NODE_LIST[i+1]),
+                "snr": random.randint(80, 100)
             }
+            for i in range(len(NODE_LIST)-1)
         ]
 
         ip_id_dict = STATUSIM
@@ -225,7 +204,7 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
     """
     try:
         if settings:
-            response="Success"
+            response = "Success"
             msg = {"Error"} if "error" in response else {"Success"}
 
             return msg
@@ -253,13 +232,10 @@ async def get_battery():
 
     ips_batteries = [
         {
-            "ip": IP_LIST[0],
-            "percent": "100"
-        },
-        {
-            "ip": IP_LIST[1],
-            "percent": "20"
+            "ip": IP_LIST[i],
+            "percent": str(random.randint(10, 100))
         }
+        for i in range(len(IP_LIST))
     ]
 
     print("Updated battery status")
@@ -337,7 +313,7 @@ async def get_camera():
     global IP_LIST
     try:
 
-        streams= [
+        streams = [
             {
                 "camera": {
                     "ip": "172.20.245.66",
