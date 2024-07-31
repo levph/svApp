@@ -23,6 +23,7 @@ def get_radio_label(radio_ip):
     # id_label = [{'id': int(k), 'name': v} for k, v in labels.items()]
 
     ids, names = zip(*[(int(k), v) for k, v in labels.items()])
+    ids, names = list(ids), list(names)
 
     id_label = {"ids": ids, "names": names}
 

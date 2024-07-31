@@ -204,9 +204,18 @@ def set_label(node: NodeID):
     This method sets label for given device id
     :return:
     """
-    global RADIO_IP, NODE_LIST
+    global RADIO_IP, NODE_LIST, NODE_NAMES
     try:
         res = set_label_id(RADIO_IP, node.id, node.label, NODE_LIST)
+        # id_label = {"ids": ids, "names": names}
+
+        # update local node names
+        if node.id in NODE_NAMES["ids"]:
+            NODE_NAMES["names"][NODE_NAMES["ids"].index(node.id)] = node.label
+        else:
+            NODE_NAMES["ids"] += [node.id]
+            NODE_NAMES["names"] += [node.label]
+
         return {"Success"} if res else {"Fail"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
