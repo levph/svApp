@@ -228,18 +228,25 @@ async def net_data():
             # update IPs and Nodes in network
             [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
             new_ips = new_ids = []
-            if set(IP_LIST) != set(old_ip_list):
-                new_ips, new_ids = zip(*[(ip, iid) for ip, iid in zip(IP_LIST, NODE_LIST) if ip not in old_ip_list])
-                new_ips, new_ids = list(new_ips), list(new_ids)
 
+            # if any change in devices happened
+            if set(IP_LIST) != set(old_ip_list):
+
+                # add new devices if there are any
+                new_stuff = [(ip, iid) for ip, iid in zip(IP_LIST, NODE_LIST) if ip not in old_ip_list]
+                if new_stuff:
+                    new_ips, new_ids = zip(*new_stuff)
+                    new_ips, new_ids = list(new_ips), list(new_ids)
+
+                # get new devices' settings
                 new_statusim = []
                 if new_ips:
                     new_statusim = get_ptt_groups(new_ips, new_ids, NODE_NAMES)
 
+                # remove disconnected devices and add connected
                 STATUSIM = [status for status in STATUSIM if status["ip"] in IP_LIST] + new_statusim
 
-                new_ips = new_ids = new_statusim = []
-
+            # get snrs of new devices
             snrs = []
             if len(IP_LIST) > 1:
                 snrs = net_status(RADIO_IP)

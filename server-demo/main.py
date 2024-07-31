@@ -253,11 +253,11 @@ async def get_battery():
 
 async def send_messages(websocket: WebSocket, interval, func):
     """Send messages every 'interval' seconds."""
-    global BAT_INTERVAL, DATA_INTERVAL
+    # global BAT_INTERVAL, DATA_INTERVAL
     while True:
         res = await func()
         await websocket.send_text(f"{res}")
-        interval = BAT_INTERVAL if func == get_battery else DATA_INTERVAL
+        # interval = BAT_INTERVAL if func == get_battery else DATA_INTERVAL
         await asyncio.sleep(interval)
 
 
