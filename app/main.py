@@ -10,6 +10,7 @@ from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_te
 import json
 from requests.exceptions import Timeout
 from utils.send_commands import api_login, exit_session, set_version, set_credentials
+import webbrowser
 
 app = FastAPI()
 
@@ -23,13 +24,7 @@ app.add_middleware(CORSMiddleware,
                    allow_credentials=True,
                    allow_methods=["*"],
                    allow_headers=["*"])
-# TODO:
-"""
- check encrypted/log-in protected devices - 
- can you access protected devices when passwords are different?
- or just change all function bcast calls who use other IP api?
- how does encryption affect it?
-"""
+
 # global variables
 RADIO_IP = None  # string
 NODE_LIST = [None]  # int
@@ -165,6 +160,17 @@ def log_in(credentials: Credentials):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/silvus-tech-gui")
+async def open_technical_system():
+    """
+    This method opens the silvus gui
+    :return:
+    """
+    global RADIO_IP
+    url = f"http://{RADIO_IP}"
+    webbrowser.open(url, new=0, autoraise=True)
 
 
 @app.post("/set-radio-ip")

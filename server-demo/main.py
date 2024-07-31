@@ -45,10 +45,10 @@ def start_up():
         response = {"type": None, "msg": None}
         [RADIO_IP, VERSION] = ["172.20.238.213", 4]
 
-        [IP_LIST, NODE_LIST] = [["172.20.238.213", "172.20.241.202"], [65535, 64433]]
+        [IP_LIST, NODE_LIST] = [["172.20.238.213", "172.20.241.202", "172.20.123.123", "172.20.101.112"], [65535, 64433, 65534, 65533]]
 
         # names are not dynamic, saved in device flash
-        NODE_NAMES = {"ids": NODE_LIST, "names": ["radio1", "radio2"]}
+        NODE_NAMES = {"ids": NODE_LIST, "names": ["radio1", "radio2", "radio3", "radio4"]}
 
         STATUSIM = [
             {
@@ -62,6 +62,18 @@ def start_up():
                 "id": NODE_LIST[1],
                 "status": [1] + [0] * 15,
                 "name": NODE_NAMES["names"][1]
+            },
+            {
+                "ip": IP_LIST[2],
+                "id": NODE_LIST[2],
+                "status": [1] + [0] * 15,
+                "name": NODE_NAMES["names"][2]
+            },
+            {
+                "ip": IP_LIST[1],
+                "id": NODE_LIST[1],
+                "status": [1] + [0] * 15,
+                "name": NODE_NAMES["names"][2]
             }
         ]
 
@@ -180,6 +192,16 @@ async def net_data():
             {
                 "id1": str(NODE_LIST[0]),
                 "id2": str(NODE_LIST[1]),
+                "snr": 100
+            },
+            {
+                "id1": str(NODE_LIST[1]),
+                "id2": str(NODE_LIST[2]),
+                "snr": 100
+            },
+            {
+                "id1": str(NODE_LIST[2]),
+                "id2": str(NODE_LIST[3]),
                 "snr": 100
             }
         ]
