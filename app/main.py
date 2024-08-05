@@ -39,6 +39,8 @@ CREDENTIALS = None
 lock = asyncio.Lock()
 
 
+# TODO: add better version finding using build_info. Optimize batteries
+
 @app.post("/start-up")
 def start_up():
     """
@@ -238,8 +240,12 @@ async def net_data():
             [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
             new_ips = new_ids = []
 
+            change_flag = False
             # if any change in devices happened
             if set(IP_LIST) != set(old_ip_list):
+
+                # flag to alert client of topology change
+                change_flag = True
 
                 # add new devices if there are any
                 new_stuff = [(ip, iid) for ip, iid in zip(IP_LIST, NODE_LIST) if ip not in old_ip_list]
@@ -263,11 +269,12 @@ async def net_data():
             ip_id_dict = STATUSIM
 
         msg = {
-            "device-list": ip_id_dict,
-            "snr-list": snrs
+            "device_list": ip_id_dict,
+            "snr_list": snrs,
+            "has_changed": change_flag
         }
 
-        return json.dumps({"type": "net-data", "data": msg})
+        return json.dumps({"type": "net_data", "data": msg})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -299,9 +306,9 @@ async def get_battery():
     :return:
     ips_batteries - list of radio_ip - bettery status
     """
-    global RADIO_IP, NODE_LIST, IP_LIST
+    global RADIO_IP, NODE_LIST, IP_LIST, STATUSIM
 
-    ips_batteries = get_batteries(RADIO_IP, IP_LIST)
+    ips_batteries, _ = get_batteries(RADIO_IP, IP_LIST, STATUSIM)
 
     print("Updated battery status")
     print(ips_batteries)
@@ -358,14 +365,17 @@ async def get_ptt_group():
 @app.post("/set-ptt-groups")
 def set_ptt_group(ptt_data: PttData):
     try:
-        global RADIO_IP, NODE_LIST, STATUSIM
+        global RADIO_IP, NODE_LIST, STATUSIM, IP_LIST
 
         # update STATUSIM global var
         for status in STATUSIM:
             if status["ip"] in ptt_data.ips:
                 status["status"] = ptt_data.statuses[ptt_data.ips.index(status["ip"])]
 
-        response = set_ptt_groups(RADIO_IP, ptt_data.ips, NODE_LIST, ptt_data.num_groups, ptt_data.statuses)
+        # find node ids belonging to IPs we want to change
+        nodes = [NODE_LIST[IP_LIST.index(ip)] for ip in ptt_data.ips]
+
+        response = set_ptt_groups(RADIO_IP, ptt_data.ips, nodes, ptt_data.num_groups, ptt_data.statuses)
         # TODO: check that response was positive
         return {"message": "ptt group settings set succesfully"}
     except Exception as e:

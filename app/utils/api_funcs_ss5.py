@@ -281,7 +281,7 @@ def net_status(radio_ip):
     return extract_snr(response)
 
 
-def get_batteries(radio_ip, radio_ips):
+def get_batteries(radio_ip, radio_ips,statusim):
     """
     This method returns battery percent for each device in the network
     :param radio_ips: ips of devices to test
@@ -293,8 +293,11 @@ def get_batteries(radio_ip, radio_ips):
 
     battery_percents = read_from_multiple(radio_ip, radio_ips, methods, params)
 
+    # for status in statusim:
+    #     status['percent'] = battery_percents[radio_ips.index(status["ip"])][0]
+
     result = [{"ip": ip, "percent": percent[0]} for ip, percent in zip(radio_ips, battery_percents)]
-    return result
+    return result, statusim
 
 
 def get_ptt_groups(ips, ids, names):
@@ -302,7 +305,7 @@ def get_ptt_groups(ips, ids, names):
     statuses = [[] for _ in range(len(ips))]
     global_max_group = 0
     for radio_index, radio_ip in enumerate(ips):
-        ptt_groups = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[[]])[0]
+        ptt_groups = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[[]], param_flag=1)[0]
         states = ptt_groups.split('_')
         listen = states[0].split(',')
         talk = states[1].split(',')
@@ -374,9 +377,12 @@ def set_ptt_groups(radio_ip, ips, nodelist, num_groups, statuses):
         ptt_settings.append([ptt_str])
 
     for ii in range(len(nodelist)):
+        # send to each radio its ptt settings
         res = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[ptt_settings[ii]], bcast=1,
                                nodelist=[nodelist[ii]])
 
+    # save settings for all
+    res = send_commands_ip(["setenvlinsingle"], radio_ip=radio_ip, params=[["ptt_active_mcast_group"]], bcast=1, nodelist=nodelist)
     return "Success maybe"
 
 

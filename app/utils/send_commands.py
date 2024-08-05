@@ -274,7 +274,7 @@ def send_save_node_label(radio_ip, label_string, nodelist):
 
 
 # TODO: test all functions
-def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, timeout=None):
+def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, param_flag=0, timeout=None):
     """
     Method able to send one command or multiple to one radio.
     Including error handling
@@ -290,11 +290,13 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
     headers = {
         'Content-Type': 'application/json'
     }
+    param_str = "param" if param_flag else "params"
+
     if bcast:
 
         command_list = [{
             "method": methods[i],
-            "param": params[i]
+            param_str: params[i]
 
         } for i in range(len(methods))]
 
@@ -302,7 +304,7 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
             "apis": [
                 {
                     "method": "deferred_execution_api",
-                    "params": {
+                    param_str: {
                         "version": "1",
                         "sleep": "0",
                         "api_list": command_list
@@ -322,7 +324,7 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
             "jsonrpc": "2.0",
             "method": methods[i],
             "id": i,
-            "param": params[i]
+            param_str: params[i]
 
         } for i in range(len(methods))]
 
@@ -348,9 +350,13 @@ def send_commands_ip(methods, radio_ip, params=None, bcast=0, nodelist=None, tim
 
         # save cookie if all else was succesfull 
         COOKIE = temp_cookie
-        # TODO: check how to parse bcast result
         if not bcast:
             response = (response['result'] if len(methods) == 1 else [res['result'] for res in response])
+        else:
+            # check bcast success
+            success_flag = all(item[0]['result'] == [''] for item in response)
+            if not success_flag:
+                raise RuntimeError('Broadcast Failed')
 
         return response  # return the content
 
