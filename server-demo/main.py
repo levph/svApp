@@ -54,6 +54,9 @@ def start_up():
                                  "172.20.6.43", "172.20.143.68"],
                                 [65535, 64433, 65534, 65533, 17452, 37558, 40767, 57001, 60757, 63726]]
 
+        IP_LIST = IP_LIST[:2]
+        NODE_LIST = NODE_LIST[:2]
+
         # names are not dynamic, saved in device flash
         NODE_NAMES = {"ids": NODE_LIST, "names": [f"radio{i}" for i in range(len(IP_LIST))]}
 
