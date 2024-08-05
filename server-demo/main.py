@@ -196,11 +196,12 @@ async def net_data():
         ip_id_dict = STATUSIM
 
         msg = {
-            "device-list": ip_id_dict,
-            "snr-list": snrs
+            "device_list": ip_id_dict,
+            "snr_list": snrs,
+            "has_changed": False
         }
 
-        return json.dumps({"type": "net-data", "data": msg})
+        return json.dumps({"type": "net_data", "data": msg})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
