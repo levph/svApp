@@ -30,8 +30,12 @@ STATUSIM = [None]
 VERSION = 5  # assume 5
 CAM_DATA = None
 CREDENTIALS = None
-BAT_INTERVAL = 300
-DATA_INTERVAL = 2
+
+### CHOOSE NET UPDATE INTERVAL IN SECONDS
+NET_INTERVAL: int = 2
+
+### CHOOSE AMOUNT OF DEVICES (MAX 40)
+NUM_DEVICES: int = 2
 
 # Create a lock
 lock = asyncio.Lock()
@@ -44,18 +48,27 @@ def start_up():
     Updates relevant global variables.
     :return: json with type and msg fields
     """
-    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM, NUM_DEVICES
     try:
         response = {"type": None, "msg": None}
         [RADIO_IP, VERSION] = ["172.20.238.213", 4]
 
-        [IP_LIST, NODE_LIST] = [["172.20.238.213", "172.20.241.202", "172.20.123.123", "172.20.101.112",
-                                 "172.20.104.185", "172.20.48.44", "172.20.227.29", "172.20.248.181",
-                                 "172.20.6.43", "172.20.143.68"],
-                                [65535, 64433, 65534, 65533, 17452, 37558, 40767, 57001, 60757, 63726]]
+        [IP_LIST, NODE_LIST] = [
+            ["172.20.238.213", "172.20.241.202", "172.20.123.123", "172.20.101.112", "172.20.208.99", "172.20.71.67",
+             "172.20.94.103", "172.20.1.250", "172.20.83.30", "172.20.179.212", "172.20.23.206", "172.20.192.230",
+             "172.20.181.146", "172.20.124.179", "172.20.241.182", "172.20.19.39", "172.20.72.37", "172.20.36.110",
+             "172.20.84.201", "172.20.94.201", "172.20.57.137", "172.20.6.128", "172.20.5.146", "172.20.148.143",
+             "172.20.139.53", "172.20.9.42", "172.20.210.154", "172.20.97.208", "172.20.111.159", "172.20.231.32",
+             "172.20.225.76", "172.20.15.91", "172.20.35.79", "172.20.221.203", "172.20.77.53", "172.20.122.82",
+             "172.20.249.45", "172.20.29.229", "172.20.234.16", "172.20.88.240"],
+            [65535, 64433, 65534, 65533, 13048, 43550, 46378, 65317, 15225, 17677, 27828, 53743, 48413, 61683, 47019,
+             39967, 55708, 29787, 7228, 37755, 46722, 14253, 56980, 26682, 39034, 15680, 11283, 8446, 64255, 20343,
+             56705, 33389, 44419, 63570, 31716, 10854, 7180, 80, 41137, 6767]
+        ]
 
-        IP_LIST = IP_LIST[:2]
-        NODE_LIST = NODE_LIST[:2]
+        ####### HERE YOU CAN CHANGE HOW MANY DEVICES TO CHOOSE ####
+        IP_LIST = IP_LIST[:NUM_DEVICES]
+        NODE_LIST = NODE_LIST[:NUM_DEVICES]
 
         # names are not dynamic, saved in device flash
         NODE_NAMES = {"ids": NODE_LIST, "names": [f"radio{i}" for i in range(len(IP_LIST))]}
@@ -274,13 +287,16 @@ async def websocket_endpoint(websocket: WebSocket):
     :param websocket:
     :return:
     """
+
+    global NET_INTERVAL
+
     await websocket.accept()
     try:
 
         # Create tasks for different message frequencies
         task1 = asyncio.create_task(send_messages(websocket, 300, get_battery))
         # task2 = asyncio.create_task(send_messages(websocket, 2, update_vars))
-        task3 = asyncio.create_task(send_messages(websocket, 2, net_data))
+        task3 = asyncio.create_task(send_messages(websocket, NET_INTERVAL, net_data))
 
         # Wait for both tasks to complete (they won't, unless there's an error)
         await asyncio.gather(task1, task3)
