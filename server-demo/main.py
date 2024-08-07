@@ -174,6 +174,20 @@ def change_interval(interval: Interval):
     DATA_INTERVAL = interval.interval
 
 
+@app.get("/get-device-battery")
+async def device_battery(ip: str = None):
+    """
+    This method returns battery of a given device
+    :return:
+    """
+    try:
+        if ip is None:
+            raise Exception("No ip supplied")
+        return {"percent": random.choice([-2, -1, 15, 30, 80])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/set-label")
 def set_label(node: NodeID):
     """
