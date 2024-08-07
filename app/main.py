@@ -1,12 +1,12 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
-    get_basic_set, set_basic_settings, get_radio_label, set_label_id, get_ptt_groups
+    get_basic_set, set_basic_settings, get_radio_label, set_label_id, get_ptt_groups, get_device_battery
 import json
 from requests.exceptions import Timeout
 from utils.send_commands import api_login, exit_session, set_version, set_credentials
@@ -25,6 +25,7 @@ app.add_middleware(CORSMiddleware,
                    allow_methods=["*"],
                    allow_headers=["*"])
 
+# TODO: move to session class (DataClass??)
 # global variables
 RADIO_IP = None  # string
 NODE_LIST = [None]  # int
@@ -50,20 +51,21 @@ def start_up():
     """
     global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM
     try:
-        response = {"type": None, "msg": None}
+        # TODO: test not breaking - read about static typing in general
+        response: Dict[Any, Any] = {"type": None, "msg": None}
 
         try:
             # sniff across interfaces to find Radio Discovery message
             [RADIO_IP, VERSION] = RADIO_IP if RADIO_IP else sniff_target_ip()
         except Exception as e:
             # If we got an error then most likely there's no connected Radio
-            print(f"Can't find connected device\n")
+            print("Can't find connected device\n")
             response["type"] = "Fail"
             response["msg"] = "Error when scanning net"
 
         else:
             if not RADIO_IP:
-                print(f"No Radio connected.\n")
+                print("No Radio connected.\n")
                 response["type"] = "Fail"
                 response["msg"] = "Can't find connected device"
 
@@ -297,6 +299,22 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
             return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/get-device-battery")
+async def device_battery(ip: str = None):
+    """
+    This method returns battery of a given device
+    :return:
+    """
+    try:
+        if ip is None:
+            raise Exception("No ip supplied")
+        percent = get_device_battery(ip)
+        return percent
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/get-battery")

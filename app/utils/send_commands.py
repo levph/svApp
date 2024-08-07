@@ -11,70 +11,12 @@ CREDENTIALS = None
 SSH_CLIENT = None
 
 
-# TODO: test
-# def ssh_multiple_commands(ip, command_template, methods, target_ips, response_pattern):
-#     """
-#     This method sends messages via the SSH api!
-#     :param methods:
-#     :param ip: IP of connected device
-#     :param command_template:
-#     :param target_ips:
-#     :param response_pattern:
-#     :return:
-#     """
-#     hostname = ip
-#     password = "root"  # hardcoded pw, sue me
-#     port = 22
-#     username = "root"
-#
-#     ssh_client = paramiko.SSHClient()
-#     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-#
-#     try:
-#         ssh_client.connect(hostname, port, username, password, timeout=10)
-#
-#         # Open an interactive shell session
-#         shell = ssh_client.invoke_shell()
-#         time.sleep(1)  # Wait for the shell prompt to appear
-#
-#         # Read the initial prompt
-#         shell.recv(1024).decode('utf-8')
-#
-#         results = []
-#         for method, target_ip in zip(methods, target_ips):
-#             command = command_template.format(target_ip=target_ip, method=method)
-#             shell.send(command + "\n")
-#             time.sleep(2)  # Wait for the command to execute
-#
-#             # Read the command output
-#             output = ""
-#             while True:
-#                 if shell.recv_ready():
-#                     chunk = shell.recv(1024).decode('utf-8')
-#                     output += chunk
-#                     time.sleep(0.5)  # Adjust sleep time if necessary
-#                     # Check if the expected pattern is in the output
-#                     match = re.search(response_pattern, output)
-#                     if match:
-#                         percent = match.group(1)
-#                         results.append(percent)
-#                         break
-#                 else:
-#                     break
-#
-#         ssh_client.close()
-#
-#         return results
-#
-#     except Exception as e:
-#         return "Error"
-
-
 # TODO: handle failed devices and test
 def read_from_multiple(radio_ip, radio_ips, methods, params):
     """
     when needed to read from multiple devices, due to device limitations, we need to send messages
-    to each device separately.
+    to each device separately. Assuming if device is protected, then all other devices are protected with same password.
+    Others will be set with value -1
     :param radio_ip: ip of connected radio
     :param params: list of lists, params for each radio
     :param radio_ips:

@@ -281,6 +281,11 @@ def net_status(radio_ip):
     return extract_snr(response)
 
 
+def get_device_battery(ip: str):
+    battery_percent = send_commands_ip(["battery_percent"], ip, params=[[]])[0]
+    return {"percent": battery_percent}
+
+
 def get_batteries(radio_ip, radio_ips,statusim):
     """
     This method returns battery percent for each device in the network
