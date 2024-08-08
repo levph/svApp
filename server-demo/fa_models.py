@@ -1,4 +1,25 @@
 from pydantic import BaseModel
+from typing import TypedDict, List, Dict
+from dataclasses import dataclass
+
+
+class SubDevice(TypedDict):
+    ip: str
+    id: int
+    status: List[int]
+    name: str
+    percent: str
+
+
+@dataclass
+class Device:
+    """Class for keeping track of a silvus radio params"""
+    ip: str
+    saved_labels: List[Dict, Dict]
+    devices: List[SubDevice]
+    # cameras:
+    credentials: None
+
 
 
 class Interval(BaseModel):
