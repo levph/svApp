@@ -27,6 +27,10 @@ class PttData(BaseModel):
     statuses: list[list[int]]
 
 
+class Interval(BaseModel):
+    value: int = 2
+
+
 class NodeID(BaseModel):
     id: int
     label: str

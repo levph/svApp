@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional, Dict, Any
 
-from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID
+from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID, Interval
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
     get_basic_set, set_basic_settings, get_radio_label, set_label_id, get_ptt_groups, get_device_battery
@@ -27,15 +27,15 @@ app.add_middleware(CORSMiddleware,
 
 # TODO: move to session class (DataClass??)
 # global variables
-RADIO_IP = None  # string
-NODE_LIST = [None]  # int
-IP_LIST = [None]  # strings
+RADIO_IP: str = None  # string
+NODE_LIST: list[int]  # int
+IP_LIST: list[str]  # strings
 NODE_NAMES = [None]
 STATUSIM = [None]
 VERSION = 5  # assume 5
 CAM_DATA = None
 CREDENTIALS = None
-
+NET_INTERVAL: int = 2
 # Create a lock
 lock = asyncio.Lock()
 
@@ -281,6 +281,21 @@ async def net_data():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/data-interval")
+def change_interval(interval: Interval):
+    """
+    This method changes the net-data update interval
+    :param interval:
+    :return:
+    """
+    global NET_INTERVAL
+    try:
+        NET_INTERVAL = int(interval.value)
+        return {f"net-data interval set to {interval}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/basic-settings")
 async def basic_settings(settings: Optional[BasicSettings] = None):
     """
@@ -301,20 +316,24 @@ async def basic_settings(settings: Optional[BasicSettings] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/get-device-battery")
-async def device_battery(ip: str = None):
+@app.get("/device-battery")
+async def device_battery(device_id: int = 0):
     """
     This method returns battery of a given device
     :return:
     """
+    global IP_LIST, NODE_LIST
     try:
-        if ip is None:
-            raise Exception("No ip supplied")
+        if not device_id:
+            raise Exception("No id supplied")
+        elif device_id not in NODE_LIST:
+            raise Exception(f"{device_id} doesn't exist")
+
+        ip = IP_LIST[NODE_LIST.index(device_id)]
         percent = get_device_battery(ip)
         return percent
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @app.get("/get-battery")
@@ -335,9 +354,11 @@ async def get_battery():
 
 async def send_messages(websocket: WebSocket, interval, func):
     """Send messages every 'interval' seconds."""
+    global NET_INTERVAL
     while True:
         res = await func()
         await websocket.send_text(f"{res}")
+        interval = interval if func == get_battery else NET_INTERVAL
         await asyncio.sleep(interval)
 
 
