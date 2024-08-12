@@ -177,7 +177,7 @@ def change_interval(interval: Interval):
     """
     global NET_INTERVAL
     try:
-        NET_INTERVAL = interval
+        NET_INTERVAL = int(interval.value)
         return {f"net-data interval set to {interval}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
