@@ -1,13 +1,13 @@
 from pydantic import BaseModel
 
 
-class Interval(BaseModel):
-    interval: int
-
-
 class UserPost(BaseModel):
     name: str
     body: str
+
+
+class Interval(BaseModel):
+    value: int = 2
 
 
 class PTTGroup(BaseModel):

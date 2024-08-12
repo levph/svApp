@@ -168,10 +168,19 @@ def set_radio_ip(ip: RadioIP):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/change-interval")
+@app.post("/data-interval")
 def change_interval(interval: Interval):
-    global DATA_INTERVAL
-    DATA_INTERVAL = interval.interval
+    """
+    This method changes the net-data update interval
+    :param interval:
+    :return:
+    """
+    global NET_INTERVAL
+    try:
+        NET_INTERVAL = interval
+        return {f"net-data interval set to {interval}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/device-battery")
@@ -284,11 +293,13 @@ async def get_battery():
 
 async def send_messages(websocket: WebSocket, interval, func):
     """Send messages every 'interval' seconds."""
-    # global BAT_INTERVAL, DATA_INTERVAL
+    # global BAT_INTERVAL, NET_INTERVAL
+    global NET_INTERVAL
     while True:
         res = await func()
         await websocket.send_text(f"{res}")
         # interval = BAT_INTERVAL if func == get_battery else DATA_INTERVAL
+        interval = interval if func == get_battery else NET_INTERVAL
         await asyncio.sleep(interval)
 
 
