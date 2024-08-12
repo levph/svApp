@@ -382,6 +382,20 @@ async def get_camera():
                         "audio": 1
                     }
                 }
+            },
+            {
+                "camera": {
+                    "ip": "172.20.245.67",
+                    "connected_to": "172.20.238.213",
+                    "main_stream": {
+                        "uri": "rtsp://172.20.245.67:554/av0_0",
+                        "audio": 1
+                    },
+                    "sub_stream": {
+                        "uri": "rtsp://172.20.245.67:554/av0_1",
+                        "audio": 1
+                    }
+                }
             }
         ]
 
