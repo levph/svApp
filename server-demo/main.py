@@ -168,6 +168,16 @@ def set_radio_ip(ip: RadioIP):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/data-interval")
+def get_interval():
+    try:
+        global NET_INTERVAL
+        interval = Interval(value=NET_INTERVAL)
+        return interval
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/data-interval")
 def change_interval(interval: Interval):
     """
