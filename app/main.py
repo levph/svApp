@@ -36,6 +36,9 @@ VERSION = 5  # assume 5
 CAM_DATA = None
 CREDENTIALS = None
 NET_INTERVAL: int = 2
+KNOWN_BATTERIES: dict[str, str] = {}
+# DISCONNECT_TIMEOUT = 1 TODO
+
 # Create a lock
 lock = asyncio.Lock()
 
@@ -232,7 +235,7 @@ async def net_data():
     assumes at least one radio is connected! will be fixed later
     :return:
     """
-    global IP_LIST, NODE_LIST, VERSION, RADIO_IP, NODE_NAMES, STATUSIM
+    global IP_LIST, NODE_LIST, VERSION, RADIO_IP, NODE_NAMES, STATUSIM, KNOWN_BATTERIES
 
     try:
         async with lock:
@@ -260,6 +263,9 @@ async def net_data():
                 if new_ips:
                     new_statusim = get_ptt_groups(new_ips, new_ids, NODE_NAMES)
 
+                # remove disconnected batteries
+                KNOWN_BATTERIES = {ip: percent for ip, percent in KNOWN_BATTERIES.items() if ip in IP_LIST}
+
                 # remove disconnected devices and add connected
                 STATUSIM = [status for status in STATUSIM if status["ip"] in IP_LIST] + new_statusim
 
@@ -269,6 +275,10 @@ async def net_data():
                 snrs = net_status(RADIO_IP)
 
             ip_id_dict = STATUSIM
+
+            # update percents
+            for elem in ip_id_dict:
+                elem["percent"] = "-1" if elem["ip"] not in KNOWN_BATTERIES else KNOWN_BATTERIES[elem["ip"]]
 
         msg = {
             "device_list": ip_id_dict,
@@ -336,7 +346,7 @@ async def device_battery(device_id: int = 0):
     This method returns battery of a given device
     :return:
     """
-    global IP_LIST, NODE_LIST
+    global IP_LIST, NODE_LIST, KNOWN_BATTERIES
     try:
         if not device_id:
             raise Exception("No id supplied")
@@ -345,6 +355,8 @@ async def device_battery(device_id: int = 0):
 
         ip = IP_LIST[NODE_LIST.index(device_id)]
         percent = get_device_battery(ip)
+        async with lock:
+            KNOWN_BATTERIES[ip] = str(percent)
         return percent
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -357,9 +369,11 @@ async def get_battery():
     :return:
     ips_batteries - list of radio_ip - bettery status
     """
-    global RADIO_IP, NODE_LIST, IP_LIST, STATUSIM
+    global RADIO_IP, NODE_LIST, IP_LIST, KNOWN_BATTERIES
 
-    ips_batteries, _ = get_batteries(RADIO_IP, IP_LIST, STATUSIM)
+    ips_batteries, ips_batteries_new_format = get_batteries(RADIO_IP, IP_LIST)
+    async with lock:
+        KNOWN_BATTERIES = KNOWN_BATTERIES | ips_batteries_new_format  # latter overrides former (dict union)
 
     print("Updated battery status")
     print(ips_batteries)

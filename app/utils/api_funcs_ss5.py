@@ -294,7 +294,7 @@ def get_device_battery(ip: str):
     return {"percent": battery_percent}
 
 
-def get_batteries(radio_ip, radio_ips,statusim):
+def get_batteries(radio_ip, radio_ips):
     """
     This method returns battery percent for each device in the network
     :param radio_ips: ips of devices to test
@@ -310,7 +310,8 @@ def get_batteries(radio_ip, radio_ips,statusim):
     #     status['percent'] = battery_percents[radio_ips.index(status["ip"])][0]
 
     result = [{"ip": ip, "percent": percent[0]} for ip, percent in zip(radio_ips, battery_percents)]
-    return result, statusim
+    result_new_format = {d['ip']: d['percent'] for d in result}
+    return result, result_new_format
 
 
 def get_ptt_groups(ips, ids, names):
@@ -474,6 +475,3 @@ def set_basic_settings(radio_ip, nodelist, settings):
 
     return response
 
-
-if __name__ == "__main__":
-    get_radio_label("172.20.241.202")
