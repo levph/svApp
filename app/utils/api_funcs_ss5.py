@@ -22,8 +22,15 @@ def get_radio_label(radio_ip):
     labels = send_commands_ip(["node_labels"], radio_ip=radio_ip, params=[[]])
     # id_label = [{'id': int(k), 'name': v} for k, v in labels.items()]
 
-    ids, names = zip(*[(int(k), v) for k, v in labels.items()])
-    ids, names = list(ids), list(names)
+    # add new devices if there are any
+    ids_labels = [(int(k), v) for k, v in labels.items()]
+    if ids_labels:
+        ids, names = zip(*ids_labels)
+        ids, names = list(ids), list(names)
+    else:
+        ids = names = []
+    # ids, names = zip(*[(int(k), v) for k, v in labels.items()])
+    # ids, names = list(ids), list(names)
 
     id_label = {"ids": ids, "names": names}
 
@@ -91,7 +98,7 @@ def list_devices(s_ip, version):
     return ips, node_ids
 
 
-def find_camera_streams_temp(iplist):
+def find_camera_streams_temp(iplist,idlist):
     """
     this method is temporary and assumes all cameras are silvus cameras
     with specific URLs for RTSP streams!
@@ -103,7 +110,7 @@ def find_camera_streams_temp(iplist):
     cameras = []
 
     # find connected devices in each node
-    for iip in iplist:
+    for iip, iid in zip(iplist, idlist):
         devices = send_commands_ip(["read_client_list"], radio_ip=iip, params=[[]])
         filtered_devices = [device for device in devices if device['ip'] not in iplist]
         for device in filtered_devices:
@@ -123,7 +130,8 @@ def find_camera_streams_temp(iplist):
             # define camera object if it's a camera
             camera = {
                 'ip': ip,
-                'connected_to': iip,
+                'device_ip': iip,
+                'device_id': iid,
                 'main_stream': {
                     'uri': f"rtsp://{ip}:554/av0_0",
                     'audio': 1
@@ -133,7 +141,7 @@ def find_camera_streams_temp(iplist):
                     'audio': 1
                 }
             }
-            cameras.append({f'camera': camera})
+            cameras.append(camera)
 
     return cameras
 
@@ -466,3 +474,6 @@ def set_basic_settings(radio_ip, nodelist, settings):
 
     return response
 
+
+if __name__ == "__main__":
+    get_radio_label("172.20.241.202")

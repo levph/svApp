@@ -281,6 +281,20 @@ async def net_data():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/data-interval")
+def get_interval():
+    """
+    Endpoint for getting current data update interval
+    :return:
+    """
+    try:
+        global NET_INTERVAL
+        interval = Interval(value=NET_INTERVAL)
+        return interval
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/data-interval")
 def change_interval(interval: Interval):
     """
