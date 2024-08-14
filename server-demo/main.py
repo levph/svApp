@@ -382,7 +382,7 @@ async def get_camera():
             {
                 "camera": {
                     "ip": "172.20.245.66",
-                    "connected_to": "172.20.241.202",
+                    "device_ip": "172.20.241.202",
                     "device_id": 64433,
                     "main_stream": {
                         "uri": "rtsp://172.20.245.66:554/av0_0",
@@ -397,7 +397,7 @@ async def get_camera():
             {
                 "camera": {
                     "ip": "172.20.245.67",
-                    "connected_to": "172.20.238.213",
+                    "device_ip": "172.20.238.213",
                     "device_id": 65535,
                     "main_stream": {
                         "uri": "rtsp://172.20.245.67:554/av0_0",
