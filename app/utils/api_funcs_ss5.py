@@ -289,8 +289,9 @@ def net_status(radio_ip):
     return extract_snr(response)
 
 
-def get_device_battery(ip: str):
+def get_device_battery(ip: str) -> dict[str, str]:
     battery_percent = send_commands_ip(["battery_percent"], ip, params=[[]])[0]
+    battery_percent = str(round(float(battery_percent)))
     return {"percent": battery_percent}
 
 
@@ -429,7 +430,7 @@ def get_basic_set(radio_ip):
 
     enable_max = int(res[4][0])
 
-    power = "enable_max" if enable_max else str(res[2][0])
+    power = "Enable Max Power" if enable_max else str(res[2][0])
 
     res = {
         "set_net_flag": [],
@@ -457,7 +458,7 @@ def set_basic_settings(radio_ip, nodelist, settings):
     net_id = str(settings.net_id)
     power = str(settings.power_dBm)
 
-    if power == "enable_max":
+    if power == "Enable Max Power":
         enable_max = "1"
         power = "36"
     else:

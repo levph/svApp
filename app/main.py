@@ -62,12 +62,14 @@ def start_up():
             [RADIO_IP, VERSION] = RADIO_IP if RADIO_IP else sniff_target_ip()
         except Exception as e:
             # If we got an error then most likely there's no connected Radio
+            log_out()
             print("Can't find connected device\n")
             response["type"] = "Fail"
             response["msg"] = "Error when scanning net"
 
         else:
             if not RADIO_IP:
+                log_out()
                 print("No Radio connected.\n")
                 response["type"] = "Fail"
                 response["msg"] = "Can't find connected device"
@@ -90,6 +92,7 @@ def start_up():
 
                 except (Timeout, TimeoutError):
                     print(f"Request timed out. Make sure computer/radio IP is correct")
+                    log_out()
                     response["type"] = "Fail"
                     response["msg"] = "Timeout. Incorrect computer/radio IP"
 
@@ -100,6 +103,7 @@ def start_up():
                         response["msg"] = {"ip": RADIO_IP, "is_protected": 1}
                     else:
                         print(f"Unknown Error")
+                        log_out()
                         response["type"] = "Fail"
                         response["msg"] = "Unknown Error"
                     print(e)
