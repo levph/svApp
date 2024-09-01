@@ -56,8 +56,8 @@ class LogInResponse(BaseModel):
 
 
 class Credentials(BaseModel):
-    username: str
-    password: str
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 
 class BasicSettings(BaseModel):

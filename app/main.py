@@ -57,7 +57,7 @@ def find_ip():
         raise ErrorResponse(msg="Can't find a connected device.")
 
     # RADIO_IP = radio_ip
-    return LogInResponse(type="Success", msg={"ip": RADIO_IP, "is_protected": 0})
+    return LogInResponse(type="Success", msg={"ip": radio_ip, "is_protected": 0})
 
 
 # TODO: fix all other start-up calling instances
@@ -112,7 +112,7 @@ def log_in(ip_creds: IpCredentials):
     VERSION = version
     CREDENTIALS = creds
 
-    return LogInResponse(type="Success", msg={"ip": RADIO_IP, "is_protected": 0})
+    return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 0})
 
 
 @app.post("/log-out")
