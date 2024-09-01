@@ -3,13 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional, Dict, Any
 
-from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID, Interval
+from utils.fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID, Interval, IpCredentials, \
+    LogInResponse, ErrorResponse
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import list_devices, net_status, find_camera_streams_temp, get_batteries, set_ptt_groups, \
-    get_basic_set, set_basic_settings, get_radio_label, set_label_id, get_ptt_groups, get_device_battery
+    get_basic_set, set_basic_settings, get_radio_label, set_label_id, get_ptt_groups, get_device_battery, get_version
 import json
 from requests.exceptions import Timeout
-from utils.send_commands import api_login, exit_session, set_version, set_credentials
+from utils.send_commands import api_login, exit_session, set_version, set_credentials, login
 import webbrowser
 
 app = FastAPI()
@@ -43,81 +44,75 @@ KNOWN_BATTERIES: dict[str, str] = {}
 lock = asyncio.Lock()
 
 
-# TODO: add better version finding using build_info. Optimize batteries
+@app.get("/ip")
+def find_ip():
+    try:
+        [radio_ip, _] = sniff_target_ip()
+    except Exception as e:
+        print("Can't find connected device\n")
+        raise ErrorResponse(msg=f"Error when scanning: {e}")
 
-@app.post("/start-up")
-def start_up():
+    if not radio_ip:
+        print("No Radio connected.\n")
+        raise ErrorResponse(msg="Can't find a connected device.")
+
+    # RADIO_IP = radio_ip
+    return LogInResponse(type="Success", msg={"ip": RADIO_IP, "is_protected": 0})
+
+
+# TODO: fix all other start-up calling instances
+@app.post("/log-in")
+def log_in(ip_creds: IpCredentials):
     """
     This method is called from log-in screen. Find radio IP and whether it is protected or not.
     Updates relevant global variables.
     :return: json with type and msg fields
     """
-    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM, CREDENTIALS
+
+    # extract ip from input
+    ip = ip_creds.radio_ip
+    creds = Credentials()
+
+    # attempt login if credentials were supplied
+    if ip_creds.username and ip_creds.password:
+        creds.username = ip_creds.username
+        creds.password = ip_creds.password
+        if not login(radio_ip=ip, creds=creds):
+            raise ErrorResponse(msg="Incorrect Credentials", status_code=401)
+
+    # gather initial data
     try:
-        # TODO: test not breaking - read about static typing in general
-        response: Dict[Any, Any] = {"type": None, "msg": None}
+        version = get_version(ip)
 
-        try:
-            # sniff across interfaces to find Radio Discovery message
-            [RADIO_IP, VERSION] = RADIO_IP if RADIO_IP else sniff_target_ip()
-        except Exception as e:
-            # If we got an error then most likely there's no connected Radio
-            log_out()
-            print("Can't find connected device\n")
-            response["type"] = "Fail"
-            response["msg"] = "Error when scanning net"
+        [ip_list, node_list] = list_devices(ip, version)
 
-        else:
-            if not RADIO_IP:
-                log_out()
-                print("No Radio connected.\n")
-                response["type"] = "Fail"
-                response["msg"] = "Can't find connected device"
+        # names are not dynamic, saved in device flash
+        nodes_names = get_radio_label(ip)
 
-            else:
-                # if we found a device
+        set_version(version)
 
-                # get list of devices in network
-                print(f"Radio IP set to {RADIO_IP}\n")
-                set_version(VERSION)
-                try:
-
-                    [IP_LIST, NODE_LIST] = list_devices(RADIO_IP, VERSION)
-
-                    # names are not dynamic, saved in device flash
-                    NODE_NAMES = get_radio_label(RADIO_IP)
-
-                    STATUSIM = get_ptt_groups(IP_LIST, NODE_LIST, NODE_NAMES)
-                    lev = 1
-
-                except (Timeout, TimeoutError):
-                    print(f"Request timed out. Make sure computer/radio IP is correct")
-                    log_out()
-                    response["type"] = "Fail"
-                    response["msg"] = "Timeout. Incorrect computer/radio IP"
-
-                except Exception as e:
-                    if "Authentication error" in e.args[0]:
-                        print(f"This device is password protected. Please log-in")
-                        response["type"] = "Success"
-                        response["msg"] = {"ip": RADIO_IP, "is_protected": 1}
-                    else:
-                        print(f"Unknown Error")
-                        log_out()
-                        response["type"] = "Fail"
-                        response["msg"] = "Unknown Error"
-                    print(e)
-                else:
-                    print(f"Node List set to {NODE_LIST}")
-                    print(f"IP List set to {IP_LIST}\n")
-
-                    response["type"] = "Success"
-                    response["msg"] = {"ip": RADIO_IP, "is_protected": 0}
-
-        return response
+        statusim = get_ptt_groups(ip_list, node_list, nodes_names)
+    except (Timeout, TimeoutError):
+        print(f"Invalid IP")
+        return LogInResponse(type="Fail", msg="Timeout. Incorrect computer/radio IP")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        if "Authentication error" in e.args[0]:
+            print(f"This device is password protected. Please log-in")
+            return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 1})
+        else:
+            raise ErrorResponse(msg=f"Unknown Error: {e}")
+
+    RADIO_IP = ip
+    NODE_NAMES = nodes_names
+    NODE_LIST = node_list
+    STATUSIM = statusim
+    IP_LIST = ip_list
+    VERSION = version
+    CREDENTIALS = creds
+
+    return LogInResponse(type="Success", msg={"ip": RADIO_IP, "is_protected": 0})
 
 
 @app.post("/log-out")
@@ -144,35 +139,6 @@ def log_out():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/log-in")
-def log_in(credentials: Credentials):
-    """
-    method to allow log in for locked devices
-    assumes Radio IP is already set
-    :param credentials: includes username and password strings
-    :return:
-    """
-    global RADIO_IP, CREDENTIALS
-    try:
-        CREDENTIALS = credentials
-        set_credentials(credentials)
-
-        username = credentials.username
-        pw = credentials.password
-        res = api_login(username, pw, RADIO_IP)
-        if res:
-            msg = "Success"
-            # update variables after logging in
-            _ = start_up()
-        else:
-            log_out()
-            msg = "Fail"
-        return msg
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/silvus-tech-gui")
 async def open_technical_system():
     """
@@ -182,31 +148,6 @@ async def open_technical_system():
     global RADIO_IP
     url = f"http://{RADIO_IP}"
     webbrowser.open(url, new=0, autoraise=True)
-
-
-@app.post("/set-radio-ip")
-def set_radio_ip(ip: RadioIP):
-    """
-    set radio ip
-    :param ip:
-    :return:
-    """
-    global RADIO_IP, NODE_LIST, IP_LIST
-    try:
-        # set radio IP to input ip
-        RADIO_IP = ip.radio_ip
-
-        # perform startup method (which will test connectivity and update settings)
-        res = start_up()
-
-        if res["type"] == "Fail":
-            # delete current session if wrong IP
-            log_out()
-
-        # return result which can be successful or error
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/set-label")

@@ -4,7 +4,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional
-from fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID, Interval
+from fa_models import BasicSettings, PttData, RadioIP, Credentials, NodeID, Interval, LogInResponse, ErrorResponse, \
+    IpCredentials
 import json
 from requests.exceptions import Timeout
 
@@ -39,6 +40,88 @@ NUM_DEVICES: int = 2
 
 # Create a lock
 lock = asyncio.Lock()
+
+
+@app.get("/ip")
+def find_ip():
+    global RADIO_IP, VERSION
+
+    RADIO_IP = "172.20.238.213"
+    result = random.choice([-1, 0, 1])
+    # fail
+    if result == -1:
+        raise ErrorResponse(msg="Error Message")
+    elif result == 0:
+        return LogInResponse(type="Success", msg={"ip": RADIO_IP, "is_protected": 1})
+    else:
+        return LogInResponse(type="Success", msg={"ip": RADIO_IP, "is_protected": 0})
+
+
+def setup():
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM, NUM_DEVICES
+    [RADIO_IP, VERSION] = ["172.20.238.213", 4]
+
+    [IP_LIST, NODE_LIST] = [
+        ["172.20.238.213", "172.20.241.202", "172.20.123.123", "172.20.101.112", "172.20.208.99", "172.20.71.67",
+         "172.20.94.103", "172.20.1.250", "172.20.83.30", "172.20.179.212", "172.20.23.206", "172.20.192.230",
+         "172.20.181.146", "172.20.124.179", "172.20.241.182", "172.20.19.39", "172.20.72.37", "172.20.36.110",
+         "172.20.84.201", "172.20.94.201", "172.20.57.137", "172.20.6.128", "172.20.5.146", "172.20.148.143",
+         "172.20.139.53", "172.20.9.42", "172.20.210.154", "172.20.97.208", "172.20.111.159", "172.20.231.32",
+         "172.20.225.76", "172.20.15.91", "172.20.35.79", "172.20.221.203", "172.20.77.53", "172.20.122.82",
+         "172.20.249.45", "172.20.29.229", "172.20.234.16", "172.20.88.240"],
+        [65535, 64433, 65534, 65533, 13048, 43550, 46378, 65317, 15225, 17677, 27828, 53743, 48413, 61683, 47019,
+         39967, 55708, 29787, 7228, 37755, 46722, 14253, 56980, 26682, 39034, 15680, 11283, 8446, 64255, 20343,
+         56705, 33389, 44419, 63570, 31716, 10854, 7180, 80, 41137, 6767]
+    ]
+
+    ####### HERE YOU CAN CHANGE HOW MANY DEVICES TO CHOOSE ####
+    IP_LIST = IP_LIST[:NUM_DEVICES]
+    NODE_LIST = NODE_LIST[:NUM_DEVICES]
+
+    # names are not dynamic, saved in device flash
+    NODE_NAMES = {"ids": NODE_LIST, "names": [f"radio{i}" for i in range(len(IP_LIST))]}
+
+    STATUSIM = [
+        {
+            "ip": IP_LIST[i],
+            "id": NODE_LIST[i],
+            "status": [1] + [0] * 15,
+            "name": NODE_NAMES["names"][i]
+        }
+        for i in range(len(IP_LIST))
+    ]
+
+
+@app.post("/log-in")
+def log_in(ip_creds: IpCredentials):
+    """
+    This method is called from log-in screen. Find radio IP and whether it is protected or not.
+    Updates relevant global variables.
+    :return: json with type and msg fields
+    """
+    global RADIO_IP, NODE_LIST, IP_LIST, VERSION, NODE_NAMES, STATUSIM
+
+    # extract ip from input
+    ip = ip_creds.radio_ip
+
+    setup()
+    protected_flag = 0
+
+    # attempt login if credentials were supplied
+    if ip_creds.username and ip_creds.password:
+        if ip_creds.username != "admin" or ip_creds.password != "Noam1":
+            raise ErrorResponse(msg="Incorrect Credentials", status_code=401)
+
+    # if no credentials and different IP, randomly draw if it's protected
+    elif ip != RADIO_IP:
+        if ip not in IP_LIST:
+            raise ErrorResponse(msg="IP doesn't exist")
+        protected_away = random.choice([True, False])
+        if protected_away:
+            return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 1})
+
+    RADIO_IP = ip
+    return LogInResponse(type="Success", msg={"ip": RADIO_IP, "is_protected": 0})
 
 
 @app.post("/start-up")
@@ -108,36 +191,6 @@ def log_out():
         RADIO_IP = VERSION = CAM_DATA = CREDENTIALS = None
 
         return "Success"
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/log-in")
-def log_in(credentials: Credentials):
-    """
-    method to allow log in for locked devices
-    assumes Radio IP is already set
-    :param credentials: includes username and password strings
-    :return:
-    """
-    global RADIO_IP, CREDENTIALS
-    try:
-        CREDENTIALS = credentials
-        res = 1
-        # set_credentials(credentials)
-        #
-        # username = credentials.username
-        # pw = credentials.password
-        # res = api_login(username, pw, RADIO_IP)
-        if res:
-            msg = "Success"
-            # update variables after logging in
-            _ = start_up()
-        else:
-            log_out()
-            msg = "Fail"
-        return msg
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

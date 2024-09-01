@@ -1,3 +1,5 @@
+from typing import Optional
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 
@@ -34,6 +36,23 @@ class Interval(BaseModel):
 class NodeID(BaseModel):
     id: int
     label: str
+
+
+class IpCredentials(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    radio_ip: str
+
+
+class ErrorResponse(HTTPException):
+    def __init__(self, msg: str, status_code: int = 500):
+        details = {"type": "Fail", "msg": msg}
+        super().__init__(status_code=status_code, detail=details)
+
+
+class LogInResponse(BaseModel):
+    type: str
+    msg: str | dict
 
 
 class Credentials(BaseModel):

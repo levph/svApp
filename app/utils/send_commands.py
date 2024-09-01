@@ -11,6 +11,27 @@ CREDENTIALS = None
 SSH_CLIENT = None
 
 
+def login(radio_ip: str, creds: Credentials):
+    global COOKIE
+    un = creds.username
+    pw = creds.password
+    CREDENTIALS = creds
+
+    # define parameters for log-in query
+    login_url = f"http://{radio_ip}/login.sh?username={un}&password={pw}&Submit=1"
+
+    # attempt login
+    response = requests.post(login_url)
+
+    # check correct login
+    if response.status_code == 200 and 'Invalid Login Authentication.' not in response.text:
+        COOKIE = response.cookies
+        return True
+    else:
+        return False
+
+
+
 # TODO: handle failed devices and test
 def read_from_multiple(radio_ip, radio_ips, methods, params):
     """

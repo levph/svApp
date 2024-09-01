@@ -310,7 +310,7 @@ def get_batteries(radio_ip, radio_ips):
     # for status in statusim:
     #     status['percent'] = battery_percents[radio_ips.index(status["ip"])][0]
 
-    result = [{"ip": ip, "percent": percent[0]} for ip, percent in zip(radio_ips, battery_percents)]
+    result = [{"ip": ip, "percent": str(round(float(percent[0])))} for ip, percent in zip(radio_ips, battery_percents)]
     result_new_format = {d['ip']: d['percent'] for d in result}
     return result, result_new_format
 
@@ -476,3 +476,7 @@ def set_basic_settings(radio_ip, nodelist, settings):
 
     return response
 
+
+def get_version(radio_ip: str):
+    response = send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
+    return 4 if "v4" in response else 5
