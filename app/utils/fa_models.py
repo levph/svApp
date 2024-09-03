@@ -60,6 +60,11 @@ class Credentials(BaseModel):
     password: Optional[str] = None
 
 
+class NodeNames(BaseModel):
+    ids: list[int] = []
+    names: list[str] = []
+
+
 class BasicSettings(BaseModel):
     set_net_flag: int
     frequency: float
