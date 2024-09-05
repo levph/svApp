@@ -78,6 +78,7 @@ class SocketMsg(BaseModel):
     data: NetDataMsg | BatteryMsg
     has_changed: Optional[bool] = None
 
+
 class Credentials(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
@@ -92,6 +93,19 @@ class Credentials(BaseModel):
 class NodeNames(BaseModel):
     ids: list[int] = []
     names: list[str] = []
+
+
+class CamStream(BaseModel):
+    uri: str
+    audio: int
+
+
+class Camera(BaseModel):
+    ip: str
+    device_ip: str
+    device_id: int
+    main_stream: CamStream
+    sub_stream: CamStream
 
 
 class BasicSettings(BaseModel):
