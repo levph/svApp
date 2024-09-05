@@ -1,17 +1,18 @@
 import requests
 import json
-from utils.send_commands import send_commands_ip, read_from_multiple, send_save_node_label, login
+from utils.send_commands import SessionManager
 from typing import Optional
-from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse
+from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse, Status
 
 
 class RadioManager:
     def __init__(self):
         self.radio_ip: Optional[str] = None
+        self.session_manager: SessionManager = SessionManager()
         self.node_list: list[int] = []
         self.ip_list: list[str] = []
         self.node_names: dict[int, str] = {}
-        self.statusim: Optional[dict] = None
+        self.statusim: list[Status] = []
         self.version: int = 5  # default
         self.cam_data = None
         self.credentials: Optional[Credentials] = None
@@ -28,7 +29,7 @@ class RadioManager:
         if ip_creds.username and ip_creds.password:
             creds.username = ip_creds.username
             creds.password = ip_creds.password
-            if not login(radio_ip=ip, creds=creds):
+            if not self.session_manager.log_in(radio_ip=ip, creds=creds):
                 raise ErrorResponse(msg="Incorrect Credentials", status_code=401)
 
         # gather initial data

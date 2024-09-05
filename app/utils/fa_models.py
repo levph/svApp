@@ -55,9 +55,22 @@ class LogInResponse(BaseModel):
     msg: str | dict
 
 
+class Status(BaseModel):
+    ip: str
+    id: int
+    status: list[int]
+    name: str
+
+
 class Credentials(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
+
+    def is_empty(self) -> bool:
+        """
+        Returns True if both username and password are either None or empty strings.
+        """
+        return not self.username and not self.password
 
 
 class NodeNames(BaseModel):
