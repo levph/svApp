@@ -144,6 +144,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/get-ptt-groups")
 async def get_ptt_group():
+    """
+    ASSUME NOT USED
+    :return:
+    """
     try:
         return await radio_manager.get_ptt_groups()
     except Exception as e:

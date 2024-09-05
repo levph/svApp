@@ -20,10 +20,10 @@ class NewLabel(BaseModel):
 
 
 class PttData(BaseModel):
-    # query = {'num_groups': 4,
-    #          'ips': ['172.20.240.107'],
-    #          'statuses': [[1, 1, 0, 0]]
-    #          }
+    # {"num_groups": 4,
+    #  "ips": ["172.20.241.202", "172.20.238.213"],
+    #  "statuses": [[1, 1, 0, 0], [1, 0, 1, 0]]
+    #  }
     num_groups: int
     ips: list[str]
     statuses: list[list[int]]
@@ -68,14 +68,9 @@ class NetDataMsg(BaseModel):
     snr_list: list[dict]
 
 
-class BatteryMsg(BaseModel):
-    # TODO
-    pass
-
-
 class SocketMsg(BaseModel):
     type: str
-    data: NetDataMsg | BatteryMsg
+    data: NetDataMsg | dict[str, str]
     has_changed: Optional[bool] = None
 
 

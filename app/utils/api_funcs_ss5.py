@@ -346,10 +346,12 @@ class RadioManager:
         :return:
         """
         cameras = []
+        methods = [["read_client_list"] for _ in range(len(self.ip_list))]
+        params = [[[]] for _ in range(len(self.ip_list))]
 
         # get list of IPs connected to each device
-        devices = self.session_manager.read_from_multiple(methods=["read_client_list"], radio_ips=self.ip_list,
-                                                          params=[[]])
+        devices = self.session_manager.read_from_multiple(methods=methods, radio_ips=self.ip_list,
+                                                          params=params)
 
         for radio_devices, iip, iid in zip(devices, self.ip_list, self.node_list):
             # filter ips already existing in network
@@ -411,7 +413,7 @@ class RadioManager:
 
         battery_percents = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
                                                                    params=params)
-        result = {ip: str(round(float(percent[0]))) for ip, percent in
+        result = {ip: str(round(float(percent))) for ip, percent in
                   zip(self.ip_list, battery_percents)}
         return result
 
@@ -533,7 +535,7 @@ class RadioManager:
         enable_max = int(res[4][0])
         power = "Enable Max Power" if enable_max else str(res[2][0])
 
-        return BasicSettings(set_net_flag=0, frequency=float(res[0][0]), bw=float(res[1][0]), net_id=res[3][0],
+        return BasicSettings(set_net_flag=0, frequency=float(res[0][0]), bw=res[1][0], net_id=res[3][0],
                              power_dBm=power)
 
     def set_basic_settings(self, settings: BasicSettings):
