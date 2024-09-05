@@ -276,7 +276,7 @@ class SessionManager:
             "nodeids": nodelist,
             "override": 1
         })
-        content = Content(api_endpoint=api_endpoint, payload=payload, headers={})
+        content = Content(endpoint=api_endpoint, payload=payload, headers={})
         try:
 
             response = self.sender(device_session.session, content, bcast=True, multiple_methods=True)

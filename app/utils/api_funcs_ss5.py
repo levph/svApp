@@ -1,6 +1,8 @@
+import asyncio
+
 import requests
 import json
-
+from fastapi import WebSocket, WebSocketDisconnect
 from requests import Timeout
 
 from utils.send_commands import SessionManager
@@ -24,7 +26,12 @@ class RadioManager:
         self.known_batteries: dict[str, str] = {}
 
     def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
-
+        """
+        Attempt login to device,
+        if succesfull, get all initial data from network
+        :param ip_creds:
+        :return:
+        """
         # extract ip from input
         ip = ip_creds.radio_ip
         creds = Credentials()
@@ -90,13 +97,52 @@ class RadioManager:
         return {"Success"}
 
     def get_silvus_gui_url(self) -> str:
+        """
+        Return URL of technician mode
+        :return:
+        """
         return f"http://{self.radio_ip}"
 
     def set_label(self, node: NodeID) -> set[str]:
+        """
+        Change label of single device in current radio
+        :param node:
+        :return:
+        """
         res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
+
+        # update name in all variables
         self.node_names[node.id] = node.label
+        for status in self.statusim:
+            if status.id == node.id:
+                status.name = node.label
 
         return {"Success"} if res else {"Fail"}
+
+    async def run_task(self, websocket: WebSocket, func, interval: int):
+        """Run the specified function at a given interval and send results via WebSocket."""
+        while True:
+            result = await func()  # Run the function
+            await websocket.send_text(result)  # Send the result over WebSocket
+            interval = interval if func == self.get_battery else self.net_interval
+            await asyncio.sleep(interval)  # Wait for the next interval
+
+    async def websocket_handler(self, websocket: WebSocket):
+        """Handles the WebSocket connection and runs tasks at intervals."""
+        await websocket.accept()
+        try:
+            # Create tasks for both functions running at different intervals
+            task1 = asyncio.create_task(self.run_task(websocket, self.get_battery, 300))
+            task2 = asyncio.create_task(self.run_task(websocket, self.get_net_data, self.net_interval))
+
+            # Wait for tasks to complete (they will run indefinitely unless there's an error)
+            await asyncio.gather(task1, task2)
+        except WebSocketDisconnect:
+            print("Client disconnected")
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            await websocket.close()
 
     async def get_net_data(self):
         # TODO:
@@ -487,7 +533,7 @@ class RadioManager:
         enable_max = int(res[4][0])
         power = "Enable Max Power" if enable_max else str(res[2][0])
 
-        return BasicSettings(set_net_flag=[], frequency=float(res[0][0]), bw=float(res[1][0]), net_id=res[3][0],
+        return BasicSettings(set_net_flag=0, frequency=float(res[0][0]), bw=float(res[1][0]), net_id=res[3][0],
                              power_dBm=power)
 
     def set_basic_settings(self, settings: BasicSettings):
@@ -527,6 +573,6 @@ class RadioManager:
         :return:
         """
         # TODO: check if i need to take response[0] or like this
-        response = self.session_manager.send_commands_ip(methods=["freq"], radio_ip="172.20.241.202", params=[[]])[0]
+        response = self.session_manager.send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
 
         return 4 if "v4" in response else 5

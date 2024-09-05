@@ -135,47 +135,17 @@ async def get_battery():
     return await radio_manager.get_battery()
 
 
-async def send_messages(websocket: WebSocket, interval, func):
-    """Send messages every 'interval' seconds."""
-    global NET_INTERVAL
-    while True:
-        res = await func()
-        await websocket.send_text(f"{res}")
-        interval = interval if func == radio_manager.get_battery else NET_INTERVAL
-        await asyncio.sleep(interval)
-
-
+# Minimal WebSocket route
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    This method automates routine data sending to front
-    such as battery percentages every X seconds, network SNRs, update global variables...
-    :param websocket:
-    :return:
-    """
-    await websocket.accept()
-    try:
-
-        # Create tasks for different message frequencies
-        task1 = asyncio.create_task(send_messages(websocket, 300, radio_manager.get_battery))
-        task3 = asyncio.create_task(send_messages(websocket, 2, radio_manager.get_net_data))
-
-        # Wait for both tasks to complete (they won't, unless there's an error)
-        await asyncio.gather(task1, task3)
-
-    except WebSocketDisconnect:
-        print("Client disconnected")
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        await websocket.close()
+    """WebSocket route, delegates handling to ApiService."""
+    await radio_manager.websocket_handler(websocket)
 
 
 @app.post("/get-ptt-groups")
 async def get_ptt_group():
     try:
-        async with lock:
-            return await radio_manager.get_ptt_groups()
+        return await radio_manager.get_ptt_groups()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
