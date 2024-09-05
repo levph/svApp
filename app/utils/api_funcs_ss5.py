@@ -1,8 +1,12 @@
 import requests
 import json
+
+from requests import Timeout
+
 from utils.send_commands import SessionManager
 from typing import Optional
-from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse, Status
+from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
+    NetDataMsg, SocketMsg, Interval
 
 
 class RadioManager:
@@ -17,9 +21,9 @@ class RadioManager:
         self.cam_data = None
         self.credentials: Optional[Credentials] = None
         self.net_interval: int = 2
-        self.known_batteries = {}
+        self.known_batteries: dict[str, str] = {}
 
-    def log_in(self, ip_creds: IpCredentials):
+    def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
 
         # extract ip from input
         ip = ip_creds.radio_ip
@@ -31,6 +35,7 @@ class RadioManager:
             creds.password = ip_creds.password
             if not self.session_manager.log_in(radio_ip=ip, creds=creds):
                 raise ErrorResponse(msg="Incorrect Credentials", status_code=401)
+            # global credentials in session_manager are set now
 
         # gather initial data
         try:
@@ -41,13 +46,16 @@ class RadioManager:
             # names are not dynamic, saved in device flash
             nodes_names = self.get_radio_label(ip)
 
-            self.set_version(version)
+            self.session_manager.set_version(version)
 
             statusim = self.get_ptt_groups(ip_list, node_list, nodes_names)
         except (Timeout, TimeoutError):
             print(f"Invalid IP")
-            return LogInResponse(type="Fail", msg="Timeout. Incorrect computer/radio IP")
-
+            raise ErrorResponse(msg="Timeout. Incorrect computer/radio IP")
+        except PermissionError as e:
+            # TODO: check if we get Permission error or just exception
+            print(f"This device is password protected. Please log-in")
+            return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 1})
         except Exception as e:
             if "Authentication error" in e.args[0]:
                 print(f"This device is password protected. Please log-in")
@@ -55,43 +63,61 @@ class RadioManager:
             else:
                 raise ErrorResponse(msg=f"Unknown Error: {e}")
 
-        RADIO_IP = ip
-        NODE_NAMES = nodes_names
-        NODE_LIST = node_list
-        STATUSIM = statusim
-        IP_LIST = ip_list
-        VERSION = version
-        CREDENTIALS = creds
+        self.radio_ip = ip
+        self.node_names = nodes_names
+        self.node_list = node_list
+        self.statusim = statusim
+        self.ip_list = ip_list
+        self.version = version
+        self.credentials = creds
 
         return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 0})
 
-
     def log_out(self):
-            # Add the log_out logic here
-            pass
 
-    def get_silvus_gui_url(self):
+        self.radio_ip: None
+        self.session_manager = SessionManager()
+        self.node_list = []
+        self.ip_list = []
+        self.node_names = {}
+        self.statusim = []
+        self.version = 5  # default
+        self.cam_data = None
+        self.credentials = None
+        self.net_interval = 2
+        self.known_batteries = {}
+
+        return {"Success"}
+
+    def get_silvus_gui_url(self) -> str:
         return f"http://{self.radio_ip}"
 
-    def set_label(self, node):
-        try:
-            res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
-            self.node_names[node.id] = node.label
+    def set_label(self, node: NodeID) -> set[str]:
+        res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
+        self.node_names[node.id] = node.label
 
-            return {"Success"} if res else {"Fail"}
-        except Exception as e:
-            raise Exception(f"Error in setting label: {str(e)}")
+        return {"Success"} if res else {"Fail"}
 
     async def get_net_data(self):
+        # TODO:
+        """
+        only update globally in the end
+        use classes instead of complicated messages
+        documentation
+        :return:
+        """
         try:
-            old_ip_list = self.ip_list.copy()
-            self.ip_list, self.node_list = self.list_devices(self.radio_ip, self.version)
+            known_batteries = self.known_batteries
+            statusim = self.statusim
+            # old_ip_list = self.ip_list.copy()
+            ip_list, node_list = self.list_devices(self.radio_ip, self.version)
             new_ips, new_ids = [], []
 
             change_flag = False
-            if set(self.ip_list) != set(old_ip_list):
+            # check if there was change in iplist
+            if set(self.ip_list) != set(ip_list):
                 change_flag = True
-                new_stuff = [(ip, iid) for ip, iid in zip(self.ip_list, self.node_list) if ip not in old_ip_list]
+                new_stuff = [(ip, iid) for ip, iid in zip(ip_list, node_list) if ip not in self.ip_list]
                 if new_stuff:
                     new_ips, new_ids = zip(*new_stuff)
                     new_ips, new_ids = list(new_ips), list(new_ids)
@@ -100,32 +126,45 @@ class RadioManager:
                 if new_ips:
                     new_statusim = self.get_ptt_groups(new_ips, new_ids, self.node_names)
 
-                self.known_batteries = {ip: percent for ip, percent in self.known_batteries.items() if
-                                        ip in self.ip_list}
-                self.statusim = [status for status in self.statusim if status["ip"] in self.ip_list] + new_statusim
+                known_batteries = {ip: percent for ip, percent in known_batteries.items() if
+                                   ip in ip_list}
+                statusim = [status for status in statusim if status.ip in ip_list] + new_statusim
 
             snrs = []
             if len(self.ip_list) > 1:
-                snrs = self.net_status(self.radio_ip)
+                snrs = self.net_status()
 
-            ip_id_dict = self.statusim
-            for elem in ip_id_dict:
-                elem["percent"] = "-1" if elem["ip"] not in self.known_batteries else self.known_batteries[elem["ip"]]
+            for status in statusim:
+                if status.ip in known_batteries:
+                    status.percent = known_batteries[status.ip]
 
-            msg = {
-                "device_list": ip_id_dict,
-                "snr_list": snrs,
-                "has_changed": change_flag
-            }
+            msg = NetDataMsg(device_list=statusim, snr_list=snrs)
 
-            return json.dumps({"type": "net_data", "data": msg})
+            self.set_statusim(statusim)
+            self.set_batteries(known_batteries)
+            self.set_ip_list(ip_list)
+            self.set_node_list(node_list)
+
+            return SocketMsg(type="net_data", data=msg, has_changed=change_flag)
         except Exception as e:
-            raise Exception(f"Error in fetching net data: {str(e)}")
+            raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
 
-    def get_interval(self):
-        return {"interval": self.net_interval}
+    def set_node_list(self, nodelist: list[int]):
+        self.node_list = nodelist
 
-    def change_interval(self, interval):
+    def set_ip_list(self, iplist: list[str]):
+        self.ip_list = iplist
+
+    def set_batteries(self, batteries: dict[str, str]):
+        self.known_batteries = batteries
+
+    def set_statusim(self, statusim: list[Status]):
+        self.statusim = statusim
+
+    def get_interval(self) -> Interval:
+        return Interval(value=self.net_interval)
+
+    def change_interval(self, interval: Interval):
         self.net_interval = int(interval.value)
         return {"message": f"net-data interval set to {interval.value}"}
 
@@ -168,9 +207,9 @@ class RadioManager:
         streams = self.find_camera_streams_temp(self.ip_list, self.node_list)
         return {"message": "Success", "data": streams}
 
-    @staticmethod
-    def get_radio_label(radio_ip):
-        labels = send_commands_ip(["node_labels"], radio_ip=radio_ip, params=[[]])
+    def get_radio_label(self, radio_ip):
+        # TODO: check message output
+        labels = self.session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
         ids_labels = [(int(k), v) for k, v in labels.items()]
         if not ids_labels:
             return {}
@@ -209,7 +248,8 @@ class RadioManager:
         return ips
 
     def list_devices(self, s_ip, version):
-        node_ids = send_commands_ip(["routing_tree"], radio_ip=s_ip, params=[[]])
+        # TODO: check output
+        node_ids = self.session_manager.send_commands_ip(methods=["routing_tree"], radio_ip=s_ip, params=[[]])
         ips = self.node_id_to_ip(node_ids, version)
         return ips, node_ids
 
@@ -244,7 +284,7 @@ class RadioManager:
 
         return cameras
 
-    def net_status(self, radio_ip):
+    def net_status(self):
         def extract_snr(data):
             node_iids = []
             min_snr = {}
@@ -265,7 +305,8 @@ class RadioManager:
             snr_res = [{"id1": k[0], "id2": k[1], "snr": v} for k, v in min_snr.items()]
             return snr_res
 
-        response = send_commands_ip(["streamscape_data"], radio_ip, [[]])
+        response = self.session_manager.send_commands_ip(methods=["streamscape_data"], radio_ip=self.radio_ip,
+                                                         params=[[]])
         return extract_snr(response)
 
     def get_device_battery_percent(self, ip: str) -> dict[str, str]:
@@ -284,13 +325,15 @@ class RadioManager:
         result_new_format = {d['ip']: d['percent'] for d in result}
         return result, result_new_format
 
-    @staticmethod
-    def get_ptt_groups(ips, ids, names):
+    def get_ptt_groups(self, ips: list[str], ids: list[int], names: dict[int, str]):
         group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(15)]
         statuses = [[] for _ in range(len(ips))]
         global_max_group = 0
         for radio_index, radio_ip in enumerate(ips):
-            ptt_groups = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[[]], param_flag=1)[0]
+            # TODO: check output
+            ptt_groups = self.session_manager.send_commands_ip(methods=["ptt_active_mcast_group"], radio_ip=radio_ip,
+                                                               params=[[]],
+                                                               param_flag=1)[0]
             states = ptt_groups.split('_')
             listen = states[0].split(',')
             talk = states[1].split(',')
@@ -310,11 +353,12 @@ class RadioManager:
 
         res = []
         for ip, iid, status in zip(ips, ids, statuses):
-            if iid in names["ids"]:
-                name = names["names"][names["ids"].index(iid)]
+            if iid in names:
+                name = names[iid]
             else:
                 name = ip
-            res.append({"ip": ip, "id": iid, "status": status, "name": name})
+            # TODO: check that:
+            res.append(Status(ip=ip, id=iid, status=status, name=name, percent="-1"))
 
         return res
 
@@ -352,11 +396,11 @@ class RadioManager:
         send_commands_ip(["setenvlinsingle"], radio_ip=radio_ip, params=[["ptt_active_mcast_group"]], bcast=1,
                          nodelist=nodelist)
 
-    def set_label_id(self, radio_ip, node_id, label, nodelist):
-        current_names = send_commands_ip(["node_labels"], radio_ip, params=[[]])
+    def set_label_id(self, radio_ip: str, node_id: int, label: str, nodelist: list[int]) -> bool:
+        current_names = self.session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
         current_names[str(node_id)] = label
         current_names = json.dumps(current_names)
-        res = send_save_node_label(radio_ip, current_names, nodelist)
+        res = self.session_manager.send_save_node_label(radio_ip, current_names, nodelist)
         return res[0][0]['result'] == ['']
 
     def get_basic_set(self, radio_ip):
@@ -399,5 +443,8 @@ class RadioManager:
         return response
 
     def get_version(self, radio_ip: str):
-        response = send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
+
+        # TODO: check if i need to take response[0] or like this
+        response = self.session_manager.send_commands_ip(methods=["freq"], radio_ip="172.20.241.202", params=[[]])
+
         return 4 if "v4" in response else 5

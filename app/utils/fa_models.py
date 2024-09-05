@@ -60,7 +60,23 @@ class Status(BaseModel):
     id: int
     status: list[int]
     name: str
+    percent: str = "-1"
 
+
+class NetDataMsg(BaseModel):
+    device_list: list[Status]
+    snr_list: list[dict]
+
+
+class BatteryMsg(BaseModel):
+    # TODO
+    pass
+
+
+class SocketMsg(BaseModel):
+    type: str
+    data: NetDataMsg | BatteryMsg
+    has_changed: Optional[bool] = None
 
 class Credentials(BaseModel):
     username: Optional[str] = None

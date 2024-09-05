@@ -23,6 +23,7 @@ app.add_middleware(CORSMiddleware,
 
 radio_manager = RadioManager()  # Instantiate the RadioManager class
 
+
 @app.get("/ip")
 def find_ip():
     try:
@@ -88,7 +89,8 @@ async def net_data():
 
 
 @app.get("/data-interval")
-def get_interval():
+def get_interval() -> Interval:
+    # TODO: STOPPED HERE
     """
     Endpoint for getting current data update interval
     :return:

@@ -116,8 +116,7 @@ class SessionManager:
 
         return response
 
-    @staticmethod
-    def format_content(radio_ip: str, params, methods, bcast, nodelist, param_flag) -> Content:
+    def format_content(self, radio_ip: str, params, methods, bcast, nodelist, param_flag) -> Content:
 
         headers = {
             'Content-Type': 'application/json'
@@ -146,7 +145,7 @@ class SessionManager:
             })
 
             api_endpoint = f"http://{radio_ip}/bcast_enc.pyc"
-            if VERSION == 4:
+            if self.version == 4:
                 api_endpoint = api_endpoint[:-1]  # script has .py suffix in v4
 
         else:
@@ -253,7 +252,7 @@ class SessionManager:
         device_session = self.get_session(radio_ip)
 
         api_endpoint = f"http://{radio_ip}/bcast_enc.pyc"
-        if VERSION == 4:
+        if self.version == 4:
             api_endpoint = api_endpoint[:-1]
 
         api_list = [
