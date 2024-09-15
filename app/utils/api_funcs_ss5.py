@@ -341,7 +341,7 @@ class RadioManager:
         ips = self.node_id_to_ip(node_ids, version)
         return ips, node_ids
 
-    def find_camera_streams_temp(self) -> list[Camera]:
+    def find_camera_streams_temp(self) -> list[Camera] | ErrorResponse:
         """
         Find all cameras connected in network
         :return:
@@ -354,7 +354,13 @@ class RadioManager:
         devices = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
                                                           params=params)
 
+        if len(devices) != len(self.ip_list) or len(devices) != len(self.node_list):
+            return ErrorResponse("Problem with cameras. Try again")
+
         for radio_devices, iip, iid in zip(devices, self.ip_list, self.node_list):
+            if radio_devices == [-1]:
+                continue
+
             # filter ips already existing in network
             filtered_devices = [device for device in radio_devices if device['ip'] not in self.ip_list]
             for device in filtered_devices:

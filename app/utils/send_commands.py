@@ -228,15 +228,15 @@ class SessionManager:
             return False
 
     def read_from_multiple(self, radio_ips, methods, params):
-        results = [None] * len(radio_ips)
+        results: Optional[list] = [-1] * len(radio_ips)
         for ii, ip in enumerate(radio_ips):
             try:
                 result = self.send_commands_ip(methods[ii], radio_ip=ip, params=params[ii])
                 results[ii] = result
-            except PermissionError as e:
-                continue
             except Exception as e:
-                raise RuntimeError(f"Error in multiple sender: {e}")
+                print(f"Error in multiple sender: {e}")
+                results[ii] = [-1]
+                continue
         return results
 
     def send_save_node_label(self, radio_ip, label_string, nodelist):
