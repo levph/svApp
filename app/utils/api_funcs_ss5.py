@@ -1,482 +1,587 @@
-"""
-This file lists some of the API functions for Silvus app backend
-
-File structure:
-- send command ip
-- send broadcast
-...
-
-functions to start:
-- list devices
-- save node labels
-- report? understand how to
--
-"""
+import asyncio
 
 import requests
 import json
-from utils.send_commands import send_commands_ip, read_from_multiple, send_save_node_label
+from fastapi import WebSocket, WebSocketDisconnect
+from requests import Timeout
+
+from utils.send_commands import SessionManager
+from typing import Optional
+from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
+    NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera
 
 
-def get_radio_label(radio_ip):
-    labels = send_commands_ip(["node_labels"], radio_ip=radio_ip, params=[[]])
-    # id_label = [{'id': int(k), 'name': v} for k, v in labels.items()]
+class RadioManager:
 
-    # add new devices if there are any
-    ids_labels = [(int(k), v) for k, v in labels.items()]
-    if ids_labels:
-        ids, names = zip(*ids_labels)
-        ids, names = list(ids), list(names)
-    else:
-        ids = names = []
-    # ids, names = zip(*[(int(k), v) for k, v in labels.items()])
-    # ids, names = list(ids), list(names)
+    @classmethod
+    def default_version(cls) -> int:
+        return 5
 
-    id_label = {"ids": ids, "names": names}
+    def __init__(self):
+        self.radio_ip: Optional[str] = None
+        self.session_manager: SessionManager = SessionManager()
+        self.node_list: list[int] = []
+        self.ip_list: list[str] = []
+        self.node_names: dict[int, str] = {}
+        self.statusim: list[Status] = []
+        self.version: int = self.default_version()
+        self.cam_data = None
+        self.credentials: Optional[Credentials] = None
+        self.net_interval: int = 2
+        self.known_batteries: dict[str, str] = {}
 
-    return id_label
+    def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
+        """
+        Attempt login to device,
+        if succesfull, get all initial data from network
+        :param ip_creds:
+        :return:
+        """
+        # extract ip from input
+        ip = ip_creds.radio_ip
+        creds = Credentials()
 
+        # attempt login if credentials were supplied
+        if ip_creds.username and ip_creds.password:
+            creds.username = ip_creds.username
+            creds.password = ip_creds.password
+            if not self.session_manager.log_in(radio_ip=ip, creds=creds):
+                raise ErrorResponse(msg="Incorrect Credentials", status_code=401)
+            # global credentials in session_manager are set now
 
-def node_id_to_ip_v4(id_list):
-    last_bytes = [(node // 256, node % 256) for node in id_list]
-    iips = ["172.20." + str(b[0]) + "." + str(b[1]) for b in last_bytes]
-    return iips
+        # gather initial data
+        try:
+            version = self.get_version(ip)
 
+            [ip_list, node_list] = self.list_devices(ip, version)
 
-def node_id_to_ip(nodelist, version):
-    """
-    This method converts node ids to node ips in SW V5
-    The network base address is 172.16.0.0.
-    node ID is corresponding to last 20 bits of the IP.
-    Node IP is essentialy = base_ip + nodeID
+            # names are not dynamic, saved in device flash
+            nodes_names = self.get_radio_label(ip)
 
-    :param version: int version of firmware
-    :param nodelist: list of integers indicating network node IDs
-    :return: ips: list of corresponding node IPs
-    """
-    base_ip = "172.16.0.0"
-    ips = []
+            self.session_manager.set_version(version)
 
-    if version == 4:
-        ips = node_id_to_ip_v4(nodelist)
-    else:  # v5
-        for node_id in nodelist:
-            # Ensure node_id is within the valid range for a 20-bit number
-            if node_id < 0 or node_id >= (1 << 20):
-                raise ValueError("Node ID must be a 20-bit number (0 to 1048575).")
+            statusim = self.get_ptt_groups(ip_list, node_list, nodes_names)
+        except (Timeout, TimeoutError):
+            print(f"Invalid IP")
+            raise ErrorResponse(msg="Timeout. Incorrect computer/radio IP")
+        except PermissionError as e:
+            # TODO: check if we get Permission error or just exception
+            print(f"This device is password protected. Please log-in")
+            return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 1})
+        except Exception as e:
+            if "Authentication error" in e.args[0]:
+                print(f"This device is password protected. Please log-in")
+                return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 1})
+            else:
+                raise ErrorResponse(msg=f"Unknown Error: {e}")
 
-            # Convert base IP to binary and extract the network part
-            base_ip_octets = [int(octet) for octet in base_ip.split('.')]
-            base_ip_bin = ''.join(format(octet, '08b') for octet in base_ip_octets)
+        self.radio_ip = ip
+        self.node_names = nodes_names
+        self.node_list = node_list
+        self.statusim = statusim
+        self.ip_list = ip_list
+        self.version = version
+        self.credentials = creds
 
-            # Extract the network prefix (first 12 bits)
-            network_prefix = base_ip_bin[:12]
+        return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 0})
 
-            # Convert node ID to a 20-bit binary string
-            node_id_bin = format(node_id, '020b')
+    def log_out(self):
 
-            # Combine the network prefix and the node ID
-            ip_bin = network_prefix + node_id_bin
+        self.radio_ip: None
+        self.session_manager = SessionManager()
+        self.node_list = []
+        self.ip_list = []
+        self.node_names = {}
+        self.statusim = []
+        self.version = 5  # default
+        self.cam_data = None
+        self.credentials = None
+        self.net_interval = 2
+        self.known_batteries = {}
 
-            # Split the 32-bit binary string into four 8-bit segments
-            octets = [ip_bin[i:i + 8] for i in range(0, 32, 8)]
+        return {"Success"}
 
-            # Convert each 8-bit segment to a decimal number
-            ip_address = '.'.join(str(int(octet, 2)) for octet in octets)
+    def get_silvus_gui_url(self) -> str:
+        """
+        Return URL of technician mode
+        :return:
+        """
+        return f"http://{self.radio_ip}"
 
-            ips.append(ip_address)
+    def set_label(self, node: NodeID) -> set[str]:
+        """
+        Change label of single device in current radio
+        :param node:
+        :return:
+        """
+        res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
 
-    return ips
+        # update name in all variables
+        self.node_names[node.id] = node.label
+        for status in self.statusim:
+            if status.id == node.id:
+                status.name = node.label
 
+        return {"Success"} if res else {"Fail"}
 
-def list_devices(s_ip, version):
-    node_ids = send_commands_ip(["routing_tree"], radio_ip=s_ip, params=[[]])
+    async def run_task(self, websocket: WebSocket, func, interval: int):
+        """Run the specified function at a given interval and send results via WebSocket."""
+        while True:
+            result = await func()  # Run the function
+            await websocket.send_text(result.json())  # Send the result over WebSocket
+            interval = interval if func == self.get_battery else self.net_interval
+            await asyncio.sleep(interval)  # Wait for the next interval
 
-    # translate ids of all the nodes to ip
-    ips = node_id_to_ip(node_ids, version)
+    async def websocket_handler(self, websocket: WebSocket):
+        """Handles the WebSocket connection and runs tasks at intervals."""
+        await websocket.accept()
+        try:
+            # Create tasks for both functions running at different intervals
+            task1 = asyncio.create_task(self.run_task(websocket, self.get_battery, 300))
+            task2 = asyncio.create_task(self.run_task(websocket, self.get_net_data, self.net_interval))
 
-    return ips, node_ids
+            # Wait for tasks to complete (they will run indefinitely unless there's an error)
+            await asyncio.gather(task1, task2)
+        except WebSocketDisconnect:
+            print("Client disconnected")
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            await websocket.close()
 
+    async def get_net_data(self):
+        """
+        TODO: documentation
+        :return:
+        """
+        try:
+            known_batteries = self.known_batteries
+            statusim = self.statusim
+            # old_ip_list = self.ip_list.copy()
+            ip_list, node_list = self.list_devices(self.radio_ip, self.version)
+            new_ips, new_ids = [], []
 
-def find_camera_streams_temp(iplist,idlist):
-    """
-    this method is temporary and assumes all cameras are silvus cameras
-    with specific URLs for RTSP streams!
+            change_flag = False
+            # check if there was change in iplist
+            if set(self.ip_list) != set(ip_list):
+                change_flag = True
+                new_stuff = [(ip, iid) for ip, iid in zip(ip_list, node_list) if ip not in self.ip_list]
+                if new_stuff:
+                    new_ips, new_ids = zip(*new_stuff)
+                    new_ips, new_ids = list(new_ips), list(new_ids)
 
-    :param iplist: lists of device IPs in network
-    :return:
-    """
+                new_statusim = []
+                if new_ips:
+                    new_statusim = self.get_ptt_groups(new_ips, new_ids, self.node_names)
 
-    cameras = []
+                known_batteries = {ip: percent for ip, percent in known_batteries.items() if
+                                   ip in ip_list}
+                statusim = [status for status in statusim if status.ip in ip_list] + new_statusim
 
-    # find connected devices in each node
-    for iip, iid in zip(iplist, idlist):
-        devices = send_commands_ip(["read_client_list"], radio_ip=iip, params=[[]])
-        filtered_devices = [device for device in devices if device['ip'] not in iplist]
-        for device in filtered_devices:
-            ip = device['ip']
+            snrs = []
+            if len(self.ip_list) > 1:
+                snrs = self.net_status()
 
-            # check if it's an ONVIF camera
-            try:
-                response = requests.get(f"http://{ip}", timeout=3)
+            for status in statusim:
+                if status.ip in known_batteries:
+                    status.percent = known_batteries[status.ip]
 
-                # check if it's a silvus IP camera
-                if response.headers['Server'] != "IPCamera-Webs":
-                    continue
+            msg = NetDataMsg(device_list=statusim, snr_list=snrs)
 
-            except Exception as e:
+            self.set_statusim(statusim)
+            self.set_batteries(known_batteries)
+            self.set_ip_list(ip_list)
+            self.set_node_list(node_list)
+            return SocketMsg(type="net_data", data=msg, has_changed=change_flag)
+        except Exception as e:
+            raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
+
+    def set_node_list(self, nodelist: list[int]):
+        self.node_list = nodelist
+
+    def set_ip_list(self, iplist: list[str]):
+        self.ip_list = iplist
+
+    def set_batteries(self, batteries: dict[str, str]):
+        self.known_batteries = batteries
+
+    def set_statusim(self, statusim: list[Status]):
+        self.statusim = statusim
+
+    def get_interval(self) -> Interval:
+        return Interval(value=self.net_interval)
+
+    def change_interval(self, interval: Interval):
+        self.net_interval = int(interval.value)
+        return {"message": f"net-data interval set to {interval.value}"}
+
+    async def basic_settings(self, settings: Optional[BasicSettings]):
+        if settings:
+            response = self.set_basic_settings(settings)
+            return {"Error"} if "error" in response else {"Success"}
+        else:
+            return self.get_basic_set()
+
+    async def get_device_battery(self, device_id: int) -> dict[str, str]:
+        """
+        Get battery of a specific device
+        :param device_id:
+        :return:
+        """
+        if not device_id:
+            raise ErrorResponse(msg="No id supplied")
+        elif device_id not in self.node_list:
+            raise ErrorResponse(msg=f"{device_id} doesn't exist")
+
+        # find corresponding ip
+        ip = self.ip_list[self.node_list.index(device_id)]
+
+        # get battery percentage and format correctly
+        battery_percent = self.session_manager.send_commands_ip(["battery_percent"], ip, params=[[]])[0]
+        battery_percent = str(round(float(battery_percent)))
+
+        # update known batteries
+        self.known_batteries[ip] = battery_percent
+
+        return {"percent": battery_percent}
+
+    async def get_battery(self) -> SocketMsg:
+        """
+        WS method to get all batteries in network
+        :return:
+        """
+        ips_batteries = self.get_batteries()
+        self.known_batteries.update(ips_batteries)
+        return SocketMsg(type="battery", data=ips_batteries)
+
+    def set_ptt_groups(self, ptt_data):
+        """
+        Change ptt group settings of multiple devices
+        :param ptt_data:
+        :return:
+        """
+        try:
+            nodes = [self.node_list[self.ip_list.index(ip)] for ip in ptt_data.ips]
+            self.set_ptt_groups_impl(nodelist=nodes, num_groups=ptt_data.num_groups, statuses=ptt_data.statuses)
+
+            # update global statusim on success
+            for status in self.statusim:
+                if status.ip in ptt_data.ips:
+                    status.status = ptt_data.statuses[ptt_data.ips.index(status.ip)]
+
+            return {"message": "ptt group settings set successfully"}
+        except Exception as e:
+            raise ErrorResponse(msg=f"Error in setting PTT groups: {str(e)}")
+
+    async def get_camera_links(self):
+        """
+        Get links of all cameras connected in network (only tested with obscura)
+        :return:
+        """
+        try:
+            streams = self.find_camera_streams_temp()
+            return {"message": "Success", "data": streams}
+        except Exception as e:
+            raise ErrorResponse(msg=f"Error with camera finder: {e}")
+
+    def get_radio_label(self, radio_ip) -> dict[int, str]:
+        """
+        Get radio labels saved in radio flash memory
+        :param radio_ip:
+        :return:
+        """
+        # TODO: check message output
+        labels = self.session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
+        ids_labels = [(int(k), v) for k, v in labels.items()]
+        if not ids_labels:
+            return {}
+
+        # TODO: test that
+        node_names = dict(ids_labels)
+
+        return node_names
+
+    @staticmethod
+    def node_id_to_ip_v4(id_list):
+        last_bytes = [(node // 256, node % 256) for node in id_list]
+        iips = ["172.20." + str(b[0]) + "." + str(b[1]) for b in last_bytes]
+        return iips
+
+    def node_id_to_ip(self, nodelist, version):
+        base_ip = "172.16.0.0"
+        ips = []
+
+        if version == 4:
+            ips = self.node_id_to_ip_v4(nodelist)
+        else:
+            for node_id in nodelist:
+                if node_id < 0 or node_id >= (1 << 20):
+                    raise ValueError("Node ID must be a 20-bit number (0 to 1048575).")
+
+                base_ip_octets = [int(octet) for octet in base_ip.split('.')]
+                base_ip_bin = ''.join(format(octet, '08b') for octet in base_ip_octets)
+                network_prefix = base_ip_bin[:12]
+                node_id_bin = format(node_id, '020b')
+                ip_bin = network_prefix + node_id_bin
+                octets = [ip_bin[i:i + 8] for i in range(0, 32, 8)]
+                ip_address = '.'.join(str(int(octet, 2)) for octet in octets)
+                ips.append(ip_address)
+
+        return ips
+
+    def list_devices(self, s_ip, version) -> tuple[list[str], list[int]]:
+        """
+        Find IP and ID of every device in network
+        :param s_ip:
+        :param version:
+        :return:
+        """
+        # TODO: check output
+        node_ids = self.session_manager.send_commands_ip(methods=["routing_tree"], radio_ip=s_ip, params=[[]])
+        ips = self.node_id_to_ip(node_ids, version)
+        return ips, node_ids
+
+    def find_camera_streams_temp(self) -> list[Camera] | ErrorResponse:
+        """
+        Find all cameras connected in network
+        :return:
+        """
+        cameras = []
+        methods = [["read_client_list"] for _ in range(len(self.ip_list))]
+        params = [[[]] for _ in range(len(self.ip_list))]
+
+        # get list of IPs connected to each device
+        devices = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
+                                                          params=params)
+
+        if len(devices) != len(self.ip_list) or len(devices) != len(self.node_list):
+            return ErrorResponse("Problem with cameras. Try again")
+
+        for radio_devices, iip, iid in zip(devices, self.ip_list, self.node_list):
+            if radio_devices == [-1]:
                 continue
 
-            # define camera object if it's a camera
-            camera = {
-                'ip': ip,
-                'device_ip': iip,
-                'device_id': iid,
-                'main_stream': {
-                    'uri': f"rtsp://{ip}:554/av0_0",
-                    'audio': 1
-                },
-                'sub_stream': {
-                    'uri': f"rtsp://{ip}:554/av0_1",
-                    'audio': 1
-                }
-            }
-            cameras.append(camera)
+            # filter ips already existing in network
+            filtered_devices = [device for device in radio_devices if device['ip'] not in self.ip_list]
+            for device in filtered_devices:
+                ip = device['ip']
+                try:
+                    # funny check to see if it's a camera
+                    response = requests.get(f"http://{ip}", timeout=3)
+                    if response.headers['Server'] != "IPCamera-Webs":  # OBSCURA camera stamp
+                        continue  # onwards to next device if not camera
+                except Exception as e:
+                    continue
 
-    return cameras
+                main_stream = CamStream(uri=f"rtsp://{ip}:554/av0_0", audio=1)
+                sub_stream = CamStream(uri=f"rtsp://{ip}:554/av0_1", audio=1)
+                camera = Camera(ip=ip, device_ip=iip, device_id=iid, main_stream=main_stream, sub_stream=sub_stream)
+                cameras.append(camera)
 
+        return cameras
 
-# def find_camera_streams(iplist):
-#     """
-#     Finding all cameras in network and returns stream IPs
-#     :param iplist:
-#     :return:
-#     """
-#     # definitions
-#     username = 'admin'
-#     password = 'admin'
-#     port = 2000  # assume ONVIF port is always 2000
-#
-#     cameras = []
-#
-#     # for request timeout
-#     transport = Transport(timeout=5)
-#
-#     # find connected devices in each node
-#     for iip in iplist:
-#         devices = send_command_ip("read_client_list", ip=iip)
-#         filtered_devices = [device for device in devices if not device['mac'].startswith('c4:7c:8d')]
-#         for device in filtered_devices:
-#             ip = device['ip']
-#
-#             # check if it's an ONVIF camera
-#             try:
-#                 # TODO: timeout if camera ip not in subnet
-#                 camera = ONVIFCamera(ip, port, username, password, transport=transport)
-#
-#                 # Test a simple ONVIF request
-#                 camera.devicemgmt.GetHostname()
-#             except Exception as e:
-#                 continue
-#                 try:
-#                     response = requests.get(f"http://{ip}")
-#
-#                 except Exception as e2:
-#
-#                     # if we got an exception then it's not a camera
-#                     continue
-#
-#             # Get the media service
-#             media_service = camera.create_media_service()
-#
-#             # Get all profiles
-#             profiles = media_service.GetProfiles()
-#
-#             # Create the StreamSetup object
-#             stream_setup = {
-#                 'Stream': 'RTP-Unicast',  # or 'RTP-Multicast' if using multicast
-#                 'Transport': {
-#                     'Protocol': 'RTSP'
-#                 }
-#             }
-#
-#             # Extract RTSP stream URIs from each profile
-#             stream_uris = []
-#             audio = []
-#             for profile in profiles:
-#                 try:
-#                     # Get the stream URI for the profile
-#                     stream_uri_response = media_service.GetStreamUri({
-#                         'StreamSetup': stream_setup,
-#                         'ProfileToken': profile.token
-#                     })
-#                     stream_uris.append(stream_uri_response.Uri)
-#
-#                     # Get VideoSourceConfiguration
-#                     video_source_config = media_service.GetVideoSourceConfiguration(
-#                         {'ConfigurationToken': profile.VideoSourceConfiguration.token})
-#
-#                     # Get AudioSourceConfiguration if available
-#                     try:
-#                         audio_source_config = media_service.GetAudioSourceConfiguration(
-#                             {'ConfigurationToken': profile.AudioSourceConfiguration.token})
-#                         audio.append(1)
-#                     except:
-#                         print(f"No Audio Source Configuration for {profile.Name}")
-#                         audio.append(0)
-#
-#                 except exceptions.ONVIFError as e:
-#                     print(f"Failed to get stream URI for profile {profile.Name}: {e}")
-#
-#             # After finding all profiles
-#             camera = {
-#                 'connected_to': iip,
-#                 'main_stream': {
-#                     'uri': stream_uris[0],
-#                     'audio': audio[0]
-#                 },
-#                 'sub_stream': {
-#                     'uri': stream_uris[1],
-#                     'audio': audio[1]
-#                 }
-#             }
-#             cameras.append(camera)
-#
-#     print(cameras)
-#
-#     # connected_devices = send_command_all(method="read_client_list", radio_ip=sip, nodelist=nodelist)
-#     # check each device if it's a camera
-#     ...
-#
-#     return 1
+    def net_status(self) -> list[dict]:
+        """
+        Return list of snrs between devices in network
+        :return:
+        """
 
+        def extract_snr(data):
+            node_iids = []
+            min_snr = {}
+            for node in data:
+                node_iids.append(int(node["id"]))
+                for adjacency in node.get("adjacencies", []):
+                    nodeTo = adjacency["nodeTo"]
+                    nodeFrom = adjacency["nodeFrom"]
+                    snr_key = f"$snr_{nodeFrom}_{nodeTo}"
+                    if snr_key in adjacency["data"]:
+                        snr = int(adjacency["data"][snr_key])
+                        pair = tuple(sorted([nodeFrom, nodeTo]))
+                        if pair in min_snr:
+                            min_snr[pair] = min(min_snr[pair], snr)
+                        else:
+                            min_snr[pair] = snr
 
-def net_status(radio_ip):
-    """
-    return devices in network and SNR between them
-    :param nodelist:
-    :param radio_ip:
-    :param s_ip:
-    :return:
-    """
+            snr_res = [{"id1": k[0], "id2": k[1], "snr": v} for k, v in min_snr.items()]
+            return snr_res
 
-    def extract_snr(data):
-        node_iids = []
-        min_snr = {}
-        for node in data:
-            node_iids.append(int(node["id"]))
-            for adjacency in node.get("adjacencies", []):
-                nodeTo = adjacency["nodeTo"]
-                nodeFrom = adjacency["nodeFrom"]
-                snr_key = f"$snr_{nodeFrom}_{nodeTo}"
-                if snr_key in adjacency["data"]:
-                    snr = int(adjacency["data"][snr_key])
+        response = self.session_manager.send_commands_ip(methods=["streamscape_data"], radio_ip=self.radio_ip,
+                                                         params=[[]])
+        return extract_snr(response)
 
-                    # Create a sorted tuple to ensure (a, b) is the same as (b, a)
-                    pair = tuple(sorted([nodeFrom, nodeTo]))
+    def get_batteries(self) -> dict[str, str]:
+        """
+        Broadcast battery sampling to entire network and return current percentages
+        :return:
+        """
+        methods = [["battery_percent"] for _ in range(len(self.ip_list))]
+        params = [[[]] for _ in range(len(self.ip_list))]
 
-                    # Update the minimum SNR value for the pair
-                    if pair in min_snr:
-                        min_snr[pair] = min(min_snr[pair], snr)
-                    else:
-                        min_snr[pair] = snr
+        battery_percents = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
+                                                                   params=params)
+        result = {ip: str(round(float(percent[0]))) for ip, percent in
+                  zip(self.ip_list, battery_percents)}
+        return result
 
-        snr_res = [{"id1": k[0], "id2": k[1], "snr": v} for k, v in min_snr.items()]
+    def get_ptt_groups(self, ips: list[str], ids: list[int], names: dict[int, str]):
+        """
+        Get full status of each device asked for!
+        :param ips: list of devices ip to sample
+        :param ids: list of devices id to sample
+        :param names: list of names in connected device flash mem
+        :return:
+        """
+        # group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(15)]
+        statuses = [[] for _ in range(len(ips))]
+        global_max_group = 0
+        # parser for silvus ptt group!
+        for radio_index, radio_ip in enumerate(ips):
+            # TODO: check output, if one device has different password we're fucked:)
+            ptt_groups = self.session_manager.send_commands_ip(methods=["ptt_active_mcast_group"], radio_ip=radio_ip,
+                                                               params=[[]],
+                                                               param_flag=1)[0]
+            states = ptt_groups.split('_')
+            listen = states[0].split(',')
+            talk = states[1].split(',')
 
-        return snr_res
+            monitor = [] if len(states) < 3 else states[2].split(',')
+            max_group = int(max(listen + talk + monitor)) + 1
+            global_max_group = max(max_group, global_max_group)
+            for i in range(max_group):
+                str_i = str(i)
+                if str_i in listen:
+                    if str_i in talk:  # active
+                        statuses[radio_index].append(1)
+                    elif str_i in monitor:  # monitor
+                        statuses[radio_index].append(2)
+                else:  # inactive or does not exist
+                    statuses[radio_index].append(0)
 
-    response = send_commands_ip(["streamscape_data"], radio_ip, [[]])
-    return extract_snr(response)
+        res = []
+        for ip, iid, status in zip(ips, ids, statuses):
+            if iid in names:
+                name = names[iid]
+            else:
+                name = ip
+            # TODO: check that:
+            res.append(Status(ip=ip, id=iid, status=status, name=name, percent="-1"))
 
+        return res
 
-def get_device_battery(ip: str) -> dict[str, str]:
-    battery_percent = send_commands_ip(["battery_percent"], ip, params=[[]])[0]
-    battery_percent = str(round(float(battery_percent)))
-    return {"percent": battery_percent}
+    def set_ptt_groups_impl(self, nodelist: list[int], num_groups: int, statuses):
+        """
+        Helper to set_ptt_group method. See definition in caller
+        :param nodelist:
+        :param num_groups:
+        :param statuses:
+        :return:
+        """
+        group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
+        methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle"]
+        params = group_ips + ["ptt_mcast_group"]
+        self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params, bcast=1,
+                                              nodelist=nodelist)
 
+        ptt_settings = []
+        for status in statuses:
+            listen = []
+            talk = []
+            monitor = []
+            for ii, g in enumerate(status):
+                if g == 1:
+                    listen.append(str(ii))
+                    talk.append(str(ii))
+                elif g == 2:
+                    listen.append(str(ii))
+                    monitor.append(str(ii))
 
-def get_batteries(radio_ip, radio_ips):
-    """
-    This method returns battery percent for each device in the network
-    :param radio_ips: ips of devices to test
-    :return:
-    """
-    percents = []
-    methods = [["battery_percent"] for _ in range(len(radio_ips))]
-    params = [[[]] for _ in range(len(radio_ips))]
+            listen = ','.join(listen)
+            talk = ','.join(talk)
+            monitor = ','.join(monitor)
 
-    battery_percents = read_from_multiple(radio_ip, radio_ips, methods, params)
+            arr = [listen, talk, monitor] if monitor else [listen, talk]
+            ptt_str = '_'.join(arr)
+            ptt_settings.append([ptt_str])
 
-    # for status in statusim:
-    #     status['percent'] = battery_percents[radio_ips.index(status["ip"])][0]
+        for ii in range(len(nodelist)):
+            self.session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self.radio_ip,
+                                                  params=[ptt_settings[ii]], bcast=1, nodelist=[nodelist[ii]])
 
-    result = [{"ip": ip, "percent": str(round(float(percent[0])))} for ip, percent in zip(radio_ips, battery_percents)]
-    result_new_format = {d['ip']: d['percent'] for d in result}
-    return result, result_new_format
+        res = self.session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self.radio_ip,
+                                                    params=[["ptt_active_mcast_group"]], bcast=1,
+                                                    nodelist=nodelist)
 
+        return res
 
-def get_ptt_groups(ips, ids, names):
-    group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(15)]
-    statuses = [[] for _ in range(len(ips))]
-    global_max_group = 0
-    for radio_index, radio_ip in enumerate(ips):
-        ptt_groups = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[[]], param_flag=1)[0]
-        states = ptt_groups.split('_')
-        listen = states[0].split(',')
-        talk = states[1].split(',')
+    def set_label_id(self, radio_ip: str, node_id: int, label: str, nodelist: list[int]) -> bool:
+        """
+        Weird implementation of changing device flash with new label -
+        setting new label to device
+        :param radio_ip:
+        :param node_id:
+        :param label:
+        :param nodelist:
+        :return:
+        """
+        current_names = self.session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
+        current_names[str(node_id)] = label
+        current_names = json.dumps(current_names)
+        res = self.session_manager.send_save_node_label(radio_ip, current_names, nodelist)
+        return res[0][0]['result'] == ['']
 
-        monitor = [] if len(states) < 3 else states[2].split(',')
-        max_group = int(max(listen + talk + monitor)) + 1
-        global_max_group = max(max_group, global_max_group)
-        for i in range(max_group):
-            str_i = str(i)
-            if str_i in listen:
-                if str_i in talk:  # active
-                    statuses[radio_index].append(1)
-                elif str_i in monitor:  # monitor
-                    statuses[radio_index].append(2)
-                # should not get here
-            else:  # inactive or does not exist
-                statuses[radio_index].append(0)
+    def get_basic_set(self) -> BasicSettings:
+        """
+        Get basic settings of current device
+        :return:
+        """
+        methods = ["freq", "bw", "power_dBm", "nw_name", "enable_max_power"]
+        params = [[]] * 5
+        res = self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params)
 
-    res = []
-    for ip, iid, status in zip(ips, ids, statuses):
-        if iid in names["ids"]:
-            name = names["names"][names["ids"].index(iid)]
+        enable_max = int(res[4][0])
+        power = "Enable Max Power" if enable_max else str(res[2][0])
+
+        return BasicSettings(set_net_flag=0, frequency=float(res[0][0]), bw=res[1][0], net_id=res[3][0],
+                             power_dBm=power)
+
+    def set_basic_settings(self, settings: BasicSettings):
+        """
+        Setting basic settings to connected device / all devices
+        Forces link-distance=5000
+        :param settings:
+        :return:
+        """
+        set_net = settings.set_net_flag
+        f = str(settings.frequency)
+        bw = str(settings.bw)
+        net_id = str(settings.net_id)
+        power = str(settings.power_dBm)
+
+        if power == "Enable Max Power":
+            enable_max = "1"
+            power = "36"
         else:
-            name = ip
-        res.append({"ip": ip, "id": iid, "status": status, "name": name})
+            enable_max = "0"
 
-    return res
-    # return {'num_groups': max_group, 'ips': ips, 'statuses': statuses}
+        methods = ["nw_name", "max_link_distance", "power_dBm", "freq_bw", "enable_max_power"] + ["setenvlinsingle"] * 5
+        params = [[net_id], ["5000"], [power], [f, bw], [enable_max]] + [[name] for name in methods[:5]]
 
+        if set_net:
+            response = self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params,
+                                                             bcast=1, nodelist=self.node_list)
+        else:
+            response = self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params)
 
-def set_ptt_groups(radio_ip, ips, nodelist, num_groups, statuses):
-    """
-    This method sets ptt group settings for all radios
-    :param ips: ips of radios to change group settings
-    :param num_groups: amount of groups to set
-    :param statuses: statuses of each group
-    :return:
-    """
+        return response
 
-    # set group mcast IPs for all radios in network
-    group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
-    methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle"]
-    params = group_ips + ["ptt_mcast_group"]
-    res = send_commands_ip(methods=methods, radio_ip=radio_ip, params=params, bcast=1, nodelist=nodelist)
+    def get_version(self, radio_ip: str):
+        """
+        Find out firmware version of network
+        :param radio_ip:
+        :return:
+        """
+        # TODO: check if i need to take response[0] or like this
+        response = self.session_manager.send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
 
-    ptt_settings = []
-
-    # set status strings for each, including reset! (making other groups inactive)
-    for status in statuses:
-        # classify each group
-        listen = []
-        talk = []
-        monitor = []
-        for ii, g in enumerate(status):
-            if g == 1:
-                listen.append(str(ii))
-                talk.append(str(ii))
-            elif g == 2:
-                listen.append(str(ii))
-                monitor.append(str(ii))
-
-        listen = ','.join(listen)
-        talk = ','.join(talk)
-        monitor = ','.join(monitor)
-
-        arr = [listen, talk, monitor] if monitor else [listen, talk]
-
-        ptt_str = '_'.join(arr)
-        ptt_settings.append([ptt_str])
-
-    for ii in range(len(nodelist)):
-        # send to each radio its ptt settings
-        res = send_commands_ip(["ptt_active_mcast_group"], radio_ip=radio_ip, params=[ptt_settings[ii]], bcast=1,
-                               nodelist=[nodelist[ii]])
-
-    # save settings for all
-    res = send_commands_ip(["setenvlinsingle"], radio_ip=radio_ip, params=[["ptt_active_mcast_group"]], bcast=1, nodelist=nodelist)
-    return "Success maybe"
-
-
-def set_label_id(radio_ip, node_id, label, nodelist):
-    # get names saved in radio who's ip is radio_ip
-    current_names = send_commands_ip(["node_labels"], radio_ip, params=[[]])
-
-    # change label of node_id
-    current_names[str(node_id)] = label
-
-    # convert to acceptable format
-    current_names = json.dumps(current_names)
-
-    # use designated api method
-    res = send_save_node_label(radio_ip, current_names, nodelist)
-
-    return res[0][0]['result'] == ['']
-
-
-def get_basic_set(radio_ip):
-    """
-    get current settings of frequency, bandwidth, net_id and power of current device
-    :param radio_ip:
-    :return:
-    """
-    methods = ["freq", "bw", "power_dBm", "nw_name", "enable_max_power"]
-    params = [[]] * 5
-
-    res = send_commands_ip(methods, radio_ip, params)
-
-    enable_max = int(res[4][0])
-
-    power = "Enable Max Power" if enable_max else str(res[2][0])
-
-    res = {
-        "set_net_flag": [],
-        "frequency": float(res[0][0]),
-        "bw": float(res[1][0]),
-        "net_id": res[3][0],
-        "power_dBm": power
-    }
-
-    return res
-
-
-def set_basic_settings(radio_ip, nodelist, settings):
-    """
-    This method sets basic settings either for one radio or entire network.
-    Automatically sets max_link_distance to 5000
-    :param radio_ip: radio ip
-    :param nodelist: list of nodes in network
-    :param settings: struct containing freq, bw, net_id and power settings
-    :return:
-    """
-    set_net = settings.set_net_flag
-    f = str(settings.frequency)
-    bw = str(settings.bw)
-    net_id = str(settings.net_id)
-    power = str(settings.power_dBm)
-
-    if power == "Enable Max Power":
-        enable_max = "1"
-        power = "36"
-    else:
-        enable_max = "0"
-
-    methods = ["nw_name", "max_link_distance", "power_dBm", "freq_bw", "enable_max_power"] + ["setenvlinsingle"] * 5
-    params = [[net_id], ["5000"], [power], [f, bw], [enable_max]] + [[name] for name in methods[:5]]
-
-    if set_net:
-        # set settings for entire network
-        response = send_commands_ip(methods=methods, radio_ip=radio_ip, params=params, bcast=1, nodelist=nodelist)
-    else:
-        # set settings only for current radio
-        response = send_commands_ip(methods=methods, radio_ip=radio_ip, params=params)
-
-    return response
-
-
-def get_version(radio_ip: str):
-    response = send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
-    return 4 if "v4" in response else 5
+        return 4 if "v4" in response else 5

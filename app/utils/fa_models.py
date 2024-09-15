@@ -20,10 +20,10 @@ class NewLabel(BaseModel):
 
 
 class PttData(BaseModel):
-    # query = {'num_groups': 4,
-    #          'ips': ['172.20.240.107'],
-    #          'statuses': [[1, 1, 0, 0]]
-    #          }
+    # {"num_groups": 4,
+    #  "ips": ["172.20.241.202", "172.20.238.213"],
+    #  "statuses": [[1, 1, 0, 0], [1, 0, 1, 0]]
+    #  }
     num_groups: int
     ips: list[str]
     statuses: list[list[int]]
@@ -55,9 +55,52 @@ class LogInResponse(BaseModel):
     msg: str | dict
 
 
+class Status(BaseModel):
+    ip: str
+    id: int
+    status: list[int]
+    name: str
+    percent: str = "-1"
+
+
+class NetDataMsg(BaseModel):
+    device_list: list[Status]
+    snr_list: list[dict]
+
+
+class SocketMsg(BaseModel):
+    type: str
+    data: NetDataMsg | dict[str, str]
+    has_changed: Optional[bool] = None
+
+
 class Credentials(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
+
+    def is_empty(self) -> bool:
+        """
+        Returns True if both username and password are either None or empty strings.
+        """
+        return not self.username and not self.password
+
+
+class NodeNames(BaseModel):
+    ids: list[int] = []
+    names: list[str] = []
+
+
+class CamStream(BaseModel):
+    uri: str
+    audio: int
+
+
+class Camera(BaseModel):
+    ip: str
+    device_ip: str
+    device_id: int
+    main_stream: CamStream
+    sub_stream: CamStream
 
 
 class BasicSettings(BaseModel):
