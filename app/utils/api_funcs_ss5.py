@@ -12,6 +12,11 @@ from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse
 
 
 class RadioManager:
+
+    @classmethod
+    def default_version(cls) -> int:
+        return 5
+
     def __init__(self):
         self.radio_ip: Optional[str] = None
         self.session_manager: SessionManager = SessionManager()
@@ -19,7 +24,7 @@ class RadioManager:
         self.ip_list: list[str] = []
         self.node_names: dict[int, str] = {}
         self.statusim: list[Status] = []
-        self.version: int = 5  # default
+        self.version: int = self.default_version()
         self.cam_data = None
         self.credentials: Optional[Credentials] = None
         self.net_interval: int = 2
@@ -123,7 +128,7 @@ class RadioManager:
         """Run the specified function at a given interval and send results via WebSocket."""
         while True:
             result = await func()  # Run the function
-            await websocket.send_text(result)  # Send the result over WebSocket
+            await websocket.send_text(result.json())  # Send the result over WebSocket
             interval = interval if func == self.get_battery else self.net_interval
             await asyncio.sleep(interval)  # Wait for the next interval
 
@@ -145,11 +150,8 @@ class RadioManager:
             await websocket.close()
 
     async def get_net_data(self):
-        # TODO:
         """
-        only update globally in the end
-        use classes instead of complicated messages
-        documentation
+        TODO: documentation
         :return:
         """
         try:
@@ -190,7 +192,6 @@ class RadioManager:
             self.set_batteries(known_batteries)
             self.set_ip_list(ip_list)
             self.set_node_list(node_list)
-
             return SocketMsg(type="net_data", data=msg, has_changed=change_flag)
         except Exception as e:
             raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
@@ -281,7 +282,7 @@ class RadioManager:
             streams = self.find_camera_streams_temp()
             return {"message": "Success", "data": streams}
         except Exception as e:
-            raise ErrorResponse(msg="Error with camera finder")
+            raise ErrorResponse(msg=f"Error with camera finder: {e}")
 
     def get_radio_label(self, radio_ip) -> dict[int, str]:
         """
@@ -350,7 +351,7 @@ class RadioManager:
         params = [[[]] for _ in range(len(self.ip_list))]
 
         # get list of IPs connected to each device
-        devices = self.session_manager.read_from_multiple(methods=methods, radio_ips=self.ip_list,
+        devices = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
                                                           params=params)
 
         for radio_devices, iip, iid in zip(devices, self.ip_list, self.node_list):
@@ -413,7 +414,7 @@ class RadioManager:
 
         battery_percents = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
                                                                    params=params)
-        result = {ip: str(round(float(percent))) for ip, percent in
+        result = {ip: str(round(float(percent[0]))) for ip, percent in
                   zip(self.ip_list, battery_percents)}
         return result
 

@@ -231,7 +231,7 @@ class SessionManager:
         results = [None] * len(radio_ips)
         for ii, ip in enumerate(radio_ips):
             try:
-                result = self.send_commands_ip(methods[ii], radio_ip=ip, params=params[ii])[0]
+                result = self.send_commands_ip(methods[ii], radio_ip=ip, params=params[ii])
                 results[ii] = result
             except PermissionError as e:
                 continue
@@ -308,7 +308,6 @@ class SessionManager:
         del self.device_sessions[radio_ip]
 
 
-
 def main():
     # = "{\\\"323285\\\": \\\"lev100\\\"}"
     lev = 1
@@ -321,11 +320,11 @@ def main():
     methods = [["battery_percent"] for _ in range(len(radio_ips))]
     params = [[[]] for _ in range(len(radio_ips))]
 
-    battery_percents = session_manager.read_from_multiple(radio_ips, methods, params)
-    print(battery_percents)
+    # battery_percents = session_manager.read_from_multiple(radio_ips, methods, params)
+    # print(battery_percents)
     lev = 1
-    battery_percents2 = session_manager.read_from_multiple(radio_ips, methods, params)
-    print(battery_percents2)
+    # battery_percents2 = session_manager.read_from_multiple(radio_ips, methods, params)
+    # print(battery_percents2)
     lev = 1
 
 

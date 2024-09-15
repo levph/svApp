@@ -90,7 +90,6 @@ async def net_data():
 
 @app.get("/data-interval")
 def get_interval() -> Interval:
-    # TODO: STOPPED HERE
     """
     Endpoint for getting current data update interval
     :return:
@@ -151,7 +150,7 @@ async def get_ptt_group():
     try:
         return await radio_manager.get_ptt_groups()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise ErrorResponse(msg=str(e))
 
 
 @app.post("/set-ptt-groups")
