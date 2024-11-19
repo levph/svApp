@@ -4,11 +4,11 @@ import requests
 import json
 from fastapi import WebSocket, WebSocketDisconnect
 from requests import Timeout
-
+import time
 from utils.send_commands import SessionManager
 from typing import Optional
 from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
-    NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera
+    NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, OfflineIp
 
 
 class RadioManager:
@@ -16,6 +16,10 @@ class RadioManager:
     @classmethod
     def default_version(cls) -> int:
         return 5
+
+    @classmethod
+    def default_timeout(cls) -> int:
+        return 20
 
     def __init__(self):
         self.radio_ip: Optional[str] = None
@@ -29,6 +33,8 @@ class RadioManager:
         self.credentials: Optional[Credentials] = None
         self.net_interval: int = 2
         self.known_batteries: dict[str, str] = {}
+        self._offline_ips: list[OfflineIp] = []
+        self._offline_timeout: int = self.default_timeout()
 
     def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
         """
@@ -149,50 +155,83 @@ class RadioManager:
         finally:
             await websocket.close()
 
+
+    # TODO: test new offline feature
     async def get_net_data(self):
         """
         TODO: documentation
         :return:
         """
         try:
+
             known_batteries = self.known_batteries
             statusim = self.statusim
             # old_ip_list = self.ip_list.copy()
             ip_list, node_list = self.list_devices(self.radio_ip, self.version)
             new_ips, new_ids = [], []
 
-            change_flag = False
+            # remove expired ips
+            timestamp = time.time()
+            self._offline_ips = [offline for offline in self._offline_ips if
+                                 timestamp - offline.time < self._offline_timeout]
+
+            net_change_flag = False
             # check if there was change in iplist
             if set(self.ip_list) != set(ip_list):
-                change_flag = True
+                net_change_flag = True
+
+                # offline logic
+                # add ips that disconnected now, change their online status to false
+                for status in statusim:
+                    if status.ip not in ip_list:
+                        status.is_online = False
+                        self._offline_ips.append(OfflineIp(status=status, time=timestamp))
+
                 new_stuff = [(ip, iid) for ip, iid in zip(ip_list, node_list) if ip not in self.ip_list]
                 if new_stuff:
                     new_ips, new_ids = zip(*new_stuff)
                     new_ips, new_ids = list(new_ips), list(new_ids)
 
                 new_statusim = []
+                back_online = []
                 if new_ips:
+
+                    items_to_remove = []
+                    # back online check
+                    for offline in self._offline_ips:
+                        if offline.status.ip in new_ips:
+                            offline.status.is_online = True
+                            back_online.append(offline.status)
+                            new_ips.remove(offline.status.ip)
+                            items_to_remove.append(offline)
+
+                    # remove back online devices from offline list
+                    for item in items_to_remove:
+                        self._offline_ips.remove(item)
+
                     new_statusim = self.get_ptt_groups(new_ips, new_ids, self.node_names)
 
                 known_batteries = {ip: percent for ip, percent in known_batteries.items() if
                                    ip in ip_list}
-                statusim = [status for status in statusim if status.ip in ip_list] + new_statusim
+                statusim = [status for status in statusim if status.ip in ip_list] + new_statusim + back_online
 
             snrs = []
             if len(self.ip_list) > 1:
                 snrs = self.net_status()
 
-            for status in statusim:
+            device_list = statusim + [offline.status for offline in self._offline_ips]
+
+            for status in device_list:
                 if status.ip in known_batteries:
                     status.percent = known_batteries[status.ip]
 
-            msg = NetDataMsg(device_list=statusim, snr_list=snrs)
+            msg = NetDataMsg(device_list=device_list, snr_list=snrs)
 
             self.set_statusim(statusim)
             self.set_batteries(known_batteries)
             self.set_ip_list(ip_list)
             self.set_node_list(node_list)
-            return SocketMsg(type="net_data", data=msg, has_changed=change_flag)
+            return SocketMsg(type="net_data", data=msg, has_changed=net_change_flag)
         except Exception as e:
             raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
 

@@ -61,6 +61,7 @@ class Status(BaseModel):
     status: list[int]
     name: str
     percent: str = "-1"
+    is_online: bool
 
 
 class NetDataMsg(BaseModel):
@@ -118,3 +119,8 @@ class RadioIP(BaseModel):
 class Setting(BaseModel):
     key: str
     value: str
+
+
+class OfflineIp(BaseModel):
+    status: Status
+    time: float
