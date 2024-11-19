@@ -504,7 +504,7 @@ class RadioManager:
             else:
                 name = ip
             # TODO: check that:
-            res.append(Status(ip=ip, id=iid, status=status, name=name, percent="-1"))
+            res.append(Status(ip=ip, id=iid, status=status, name=name, percent="-1", is_online=True))
 
         return res
 
