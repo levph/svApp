@@ -336,9 +336,13 @@ class RadioManager:
         :param version:
         :return:
         """
-        # TODO: check output
         node_ids = self.session_manager.send_commands_ip(methods=["routing_tree"], radio_ip=s_ip, params=[[]])
-        ips = self.node_id_to_ip(node_ids, version)
+        node_ids = [int(node_id) for node_id in node_ids]
+        if not s_ip.startswith("172."):
+            ips = self.session_manager.send_commands_ip(methods=["virtual_ip_address"], radio_ip=s_ip, params=[[]], bcast=1, nodelist=node_ids)
+        else:
+            ips = self.node_id_to_ip(node_ids, version)
+
         return ips, node_ids
 
     def find_camera_streams_temp(self) -> list[Camera] | ErrorResponse:
@@ -508,6 +512,7 @@ class RadioManager:
             self.session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self.radio_ip,
                                                   params=[ptt_settings[ii]], bcast=1, nodelist=[nodelist[ii]])
 
+        # TODO: make sure res is correct after bcast change
         res = self.session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self.radio_ip,
                                                     params=[["ptt_active_mcast_group"]], bcast=1,
                                                     nodelist=nodelist)

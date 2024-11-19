@@ -57,7 +57,8 @@ class SessionManager:
     def parse_response(response, bcast, methods):
         # No need to parse bcast since it's write only
         if bcast:
-            return "Success"
+            # TODO: check if this is correct and add FAIL CHECK
+            return [item[0]['result'][0] for item in response]
         response = (response['result'] if len(methods) == 1 else [res['result'] for res in response])
         return response
 
@@ -131,16 +132,7 @@ class SessionManager:
             } for i in range(len(methods))]
 
             payload = json.dumps({
-                "apis": [
-                    {
-                        "method": "deferred_execution_api",
-                        param_str: {
-                            "version": "1",
-                            "sleep": "0",
-                            "api_list": command_list
-                        }
-                    }
-                ],
+                "apis": command_list,
                 "nodeids": nodelist
             })
 
