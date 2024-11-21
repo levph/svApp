@@ -1,3 +1,10 @@
+"""
+Lizi v1.0 - Server home page
+
+
+"""
+
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
