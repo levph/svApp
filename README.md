@@ -2,12 +2,15 @@
 # svApp
 
 **Description:**  
-svApp is a Python application designed to [provide a brief overview of the application's purpose and functionality].
+Lizi app server. 
 
-## Features
-- Feature 1: [Brief description of feature 1]
-- Feature 2: [Brief description of feature 2]
-- Feature 3: [Brief description of feature 3]
+## Structure
+- app/main.py: main script including all fastAPI endpoints 
+- app/utils/api_funcs_ss5.py: RadioManager service. Performs all logic on network API. Acts as sort of a middle-man between client and network
+- app/utils/send_commands.py: Messages service. In charge of communication with network API, credentials and HTTP session management.
+
+## Issues and bug reports
+if you encounter any issues. Please report them under the Issues tab and we'll fix them within 5-10 seconds (approximately)
 
 ## Installation
 
@@ -35,23 +38,9 @@ To set up the project locally, follow these steps:
 
 ## Usage
 
-To run the application:
+## IT'S INTUITIVE YOU GOT IT I BELIEVE IN YOU
 
-```bash
-python app/main.py
-```
 
-[Provide additional usage instructions, examples, or screenshots as necessary.]
-
-## Configuration
-
-The application can be configured using the following parameters:
-
-- **Parameter 1:** [Description of parameter 1]
-- **Parameter 2:** [Description of parameter 2]
-- **Parameter 3:** [Description of parameter 3]
-
-[Include details on how to set these parameters, such as through a configuration file or environment variables.]
 
 ## Contributing
 
@@ -64,7 +53,3 @@ Contributions are welcome! To contribute:
 5. Open a pull request.
 
 Please ensure your code adheres to the project's coding standards and includes appropriate tests.
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
