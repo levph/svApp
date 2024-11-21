@@ -1,16 +1,18 @@
 
 # svApp
 
+![Logo](image.png)
+
 **Description:**  
-Lizi app server. 
+Lizi app server.
 
 ## Structure
-- app/main.py: main script including all fastAPI endpoints 
-- app/utils/api_funcs_ss5.py: RadioManager service. Performs all logic on network API. Acts as sort of a middle-man between client and network
-- app/utils/send_commands.py: Messages service. In charge of communication with network API, credentials and HTTP session management.
+- app/main.py: main script including all FastAPI endpoints
+- app/utils/api_funcs_ss5.py: RadioManager service. Performs all logic on network API. Acts as a middle-man between client and network
+- app/utils/send_commands.py: Messages service. In charge of communication with network API, credentials, and HTTP session management.
 
-## Issues and bug reports
-if you encounter any issues. Please report them under the Issues tab and we'll fix them within 5-10 seconds (approximately)
+## Issues and Bug Reports
+If you encounter any issues, please report them under the Issues tab, and we'll fix them within 5-10 seconds (approximately).
 
 ## Installation
 
@@ -38,9 +40,7 @@ To set up the project locally, follow these steps:
 
 ## Usage
 
-## IT'S INTUITIVE YOU GOT IT I BELIEVE IN YOU
-
-
+## IT'S INTUITIVE YOU GOT IT, I BELIEVE IN YOU!
 
 ## Contributing
 
