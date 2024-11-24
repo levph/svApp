@@ -6,8 +6,29 @@ from pydantic import BaseModel
 
 class Content(BaseModel):
     endpoint: str
-    payload: str
+    payload: str | dict
     headers: dict
+
+
+def _build_load_request(radio_ip):
+    api_endpoint = f"http://{radio_ip}/cgi-bin/nodePositionHandler.pyc"
+    payload = {'action': 'load'}
+    headers = {}
+    return Content(endpoint=api_endpoint, payload=payload, headers=headers)
+
+
+def _build_save_request(radio_ip, node_db):
+    url = f"http://{radio_ip}/cgi-bin/nodePositionHandler.pyc"
+
+    pos_json = json.dumps({
+        "version": 0.1,
+        "nodeDB": node_db
+    })
+
+    payload = {'action': 'save',
+               'posJson': pos_json}
+    headers = {}
+    return Content(endpoint=url, payload=payload, headers=headers)
 
 
 def node_position(radio_ip: str, action: str, node_db: Optional[dict] = None) -> Content:
@@ -21,34 +42,13 @@ def node_position(radio_ip: str, action: str, node_db: Optional[dict] = None) ->
     }
     :return:
     """
-    if node_db is None:
-        node_db = {}
 
-    # build the api endpoint
-    api_endpoint = f"http://{radio_ip}/cgi-bin/nodePositionHandler.pyc"
+    if action == "load":
+        return _build_load_request(radio_ip)
+    elif action == "save":
+        return _build_save_request(radio_ip,node_db)
 
-    # Build the payload
-    boundary = "----WebKitFormBoundaryvonoWFP0xDp5EfNG"
-    pos_json = json.dumps({"version": 0.1, "nodeDB": node_db})
-    payload = (
-        f"{boundary}\r\n"
-        f'Content-Disposition: form-data; name="action"\r\n\r\n{action}\r\n'
-        f"{boundary}\r\n"
-    )
-    if action == "save":
-        payload += (
-            f'Content-Disposition: form-data; name="posJson"\r\n\r\n{pos_json}\r\n'
-            f"{boundary}--\r\n"
-        )
-
-    # Define headers
-    headers = {
-        "Connection": "keep-alive",
-        "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundaryvonoWFP0xDp5EfNG",
-        "X-Requested-With": "XMLHttpRequest",
-    }
-
-    return Content(endpoint=api_endpoint, payload=payload, headers=headers)
+    raise ValueError("Incorrect action")
 
 
 def build_json_rpc_payload(methods: list[str], params: list[list]) -> str:

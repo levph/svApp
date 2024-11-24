@@ -125,8 +125,8 @@ class SessionManager:
         content = self.format_content(radio_ip, params, methods, bcast, nodelist, param_flag)
 
         # send request with retry
-        response = self._sender_wrapper(radio_ip, device_session=device_session, content=content, bcast=bool(bcast),
-                                        len_methods=len(methods), type=type)
+        response = self._sender_wrapper(radio_ip, session=device_session.session, content=content, bcast=bool(bcast),
+                                        multiple_methods=len(methods) > 1, type="json")
 
         response = self.parse_response(response, bcast, methods)
 
@@ -201,12 +201,12 @@ class SessionManager:
 
         response.raise_for_status()  # Raise an exception for HTTP errors
 
-        if type is not "json":
-            return response
-
         # in case it's a broadcast method
         if bcast and response.text == 'Error. Must be admin user.\n':
             raise PermissionError(f"Device is protected. Please log-in")
+
+        if type == "topology-save":
+            return 'JSON Valid' in response.text
 
         response = response.json()
 
@@ -334,11 +334,15 @@ class SessionManager:
         :param node_db: Node database containing position data.
         :return: Response from the server.
         """
+        msg_type = "topology"
+        if action == "save":
+            msg_type += "-save"
         session = self.get_session(radio_ip)
         content = request_builder.node_position(radio_ip, action, node_db)
-
         # Send the request using the generic method
-        return self._sender_wrapper(radio_ip, session, content, False, 1)
+        return self._sender_wrapper(radio_ip, session=session.session, content=content, bcast=False,
+                                    multiple_methods=False,
+                                    type=msg_type)
 
     def clear_session(self, radio_ip):
         del self.device_sessions[radio_ip]

@@ -8,7 +8,7 @@ from requests import Timeout
 from utils.send_commands import SessionManager
 from typing import Optional
 from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
-    NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera
+    NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, Topology, NodePos
 
 
 class RadioManager:
@@ -101,12 +101,33 @@ class RadioManager:
 
         return {"Success"}
 
-    def get_topology(self) -> dict[str, str]:
+    def save_topology(self, topology: Topology):
+        """
+        Save topology to device flash memory
+        :param topology:
+        :return:
+        """
+        node_db = {}
+        for node in topology.device_list:
+            node_db[str(node.id)] = {"pos": {"x": node.pos[0], "y": node.pos[1]}}
+
+        res = self.session_manager.send_topology(self.radio_ip, action="save", node_db=node_db)
+        return {"Success"} if res else {"Fail"}
+
+    def get_topology(self) -> Topology:
         """
         Get topology of network
         :return:
         """
-        return self.session_manager.send_commands_ip(methods=["topology"], radio_ip=self.radio_ip, params=[[]])
+
+        res = self.session_manager.send_topology(self.radio_ip, action="load")
+        if not res:
+            return Topology(device_list=[])
+        node_db = res["nodeDB"]
+        node_list = []
+        for node_id, pos in node_db.items():
+            node_list.append(NodePos(id=int(node_id), pos=(pos["pos"]["x"], pos["pos"]["y"])))
+        return Topology(device_list=node_list)
 
     def get_silvus_gui_url(self) -> str:
         """

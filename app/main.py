@@ -4,13 +4,13 @@ Lizi v1.0 - Server home page
 
 """
 
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import Optional
 
-from utils.fa_models import BasicSettings, PttData, NodeID, Interval, IpCredentials, LogInResponse, ErrorResponse
+from utils.fa_models import BasicSettings, PttData, NodeID, Interval, IpCredentials, LogInResponse, ErrorResponse, \
+    Topology
 from utils.get_radio_ip import sniff_target_ip
 from utils.api_funcs_ss5 import RadioManager
 import webbrowser
@@ -77,13 +77,17 @@ async def open_technical_system():
 
 
 @app.get("/topology")
-def load_topology():
+def load_topology() -> Topology:
     """
     This method attempts to load a save topology structure from device flash memory
     :return:
     """
     return radio_manager.get_topology()
 
+
+@app.post("/topology")
+def save_topology(topology: Topology):
+    return radio_manager.save_topology(topology)
 
 
 @app.post("/set-label")

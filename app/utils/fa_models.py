@@ -55,6 +55,15 @@ class LogInResponse(BaseModel):
     msg: str | dict
 
 
+class NodePos(BaseModel):
+    id: int
+    pos: tuple[float, float]
+
+
+class Topology(BaseModel):
+    device_list: list[NodePos]
+
+
 class Status(BaseModel):
     ip: str
     id: int
