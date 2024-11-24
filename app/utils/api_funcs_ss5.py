@@ -101,6 +101,13 @@ class RadioManager:
 
         return {"Success"}
 
+    def get_topology(self) -> dict[str, str]:
+        """
+        Get topology of network
+        :return:
+        """
+        return self.session_manager.send_commands_ip(methods=["topology"], radio_ip=self.radio_ip, params=[[]])
+
     def get_silvus_gui_url(self) -> str:
         """
         Return URL of technician mode

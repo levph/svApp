@@ -76,6 +76,16 @@ async def open_technical_system():
     webbrowser.open(url, new=0, autoraise=True)
 
 
+@app.get("/topology")
+def load_topology():
+    """
+    This method attempts to load a save topology structure from device flash memory
+    :return:
+    """
+    return radio_manager.get_topology()
+
+
+
 @app.post("/set-label")
 def set_label(node: NodeID):
     """

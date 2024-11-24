@@ -5,6 +5,8 @@ import asyncio
 from pydantic import BaseModel, Field
 from typing import Optional
 from utils.fa_models import Credentials
+from utils import request_builder
+from utils.request_builder import Content
 
 lock = asyncio.Lock()
 
@@ -16,13 +18,6 @@ class DeviceSession(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
-
-
-# TODO
-class Content(BaseModel):
-    endpoint: str
-    payload: str
-    headers: dict
 
 
 class SessionManager:
@@ -61,6 +56,49 @@ class SessionManager:
         response = (response['result'] if len(methods) == 1 else [res['result'] for res in response])
         return response
 
+    # TODO: test this
+    def _permission_error_handler(self, radio_ip: str, device_session: DeviceSession, **kwargs):
+        # no credentials - fail
+        if not self.global_credentials:
+            raise PermissionError(f"Failed login for {radio_ip}")
+
+        # try log-in
+        if not self.log_in(radio_ip):
+            device_session.is_different_creds = True
+            raise PermissionError(f"Failed login for {radio_ip}")
+
+        # if login successful - send message again
+        return self.sender(device_session.session, **kwargs)
+
+    # TODO: test every case of kwargs
+    def _sender_wrapper(self, radio_ip: str, **kwargs):
+        """
+        Send a request to the specified radio IP using the provided session and content.
+
+        :param radio_ip: The IP address of the radio device.
+        :param device_session: The `DeviceSession` object containing the session information.
+        :param content: The `Content` object containing the endpoint, payload, and headers for the request.
+        :param bcast: A boolean indicating if the request is a broadcast.
+        :param len_methods: length of list of method names to be executed.
+        :return: The response from the server.
+        """
+
+        # send request with retry
+        try:
+            response = self.sender(**kwargs)
+        except PermissionError as e:
+            response = self._permission_error_handler(radio_ip, **kwargs)
+        except requests.exceptions.Timeout:
+            raise TimeoutError("The request timed out")
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"An error occurred: {e}")
+        except RuntimeError as e:
+            raise RuntimeError(f"Runtime error: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Unknown error: {e}")
+
+        return response
+
     def send_commands_ip(self, methods: list[str], radio_ip: str, params: list[list], bcast: int = 0,
                          nodelist: list[int] = None,
                          param_flag: int = 0, timeout=None):
@@ -84,33 +122,11 @@ class SessionManager:
         if device_session.is_different_creds:
             raise PermissionError(f"Can't login for {radio_ip}")
 
-        # format content
         content = self.format_content(radio_ip, params, methods, bcast, nodelist, param_flag)
 
-        # send request
-        try:
-            response = self.sender(device_session.session, content, bool(bcast), len(methods) > 1)
-        except PermissionError as e:
-            # no credentials - fail
-            if not self.global_credentials:
-                raise PermissionError(f"Failed login for {radio_ip}")
-
-            # try log-in
-            if not self.log_in(radio_ip):
-                device_session.is_different_creds = True
-                raise PermissionError(f"Failed login for {radio_ip}")
-
-            # if login successful - send message again
-            response = self.sender(device_session.session, content)
-
-        except requests.exceptions.Timeout:
-            raise TimeoutError("The request timed out")
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"An error occurred: {e}")
-        except RuntimeError as e:
-            raise RuntimeError(f"Runtime error: {e}")
-        except Exception as e:
-            raise RuntimeError(f"Unknown error: {e}")
+        # send request with retry
+        response = self._sender_wrapper(radio_ip, device_session=device_session, content=content, bcast=bool(bcast),
+                                        len_methods=len(methods), type=type)
 
         response = self.parse_response(response, bcast, methods)
 
@@ -168,9 +184,11 @@ class SessionManager:
         return content
 
     @staticmethod
-    def sender(session: requests.Session, content: Content, bcast: bool = False, multiple_methods: bool = False):
+    def sender(session: requests.Session, content: Content, bcast: bool = False, multiple_methods: bool = False,
+               type: str = "json"):
         """
         This function attempts to send a Silvus API request. Yields errors if necessary
+        :param type: JSON or other
         :param multiple_methods:
         :param bcast:
         :param session:
@@ -182,6 +200,9 @@ class SessionManager:
         # response = requests.post(api_endpoint, payload, timeout=10, cookies=COOKIE)
 
         response.raise_for_status()  # Raise an exception for HTTP errors
+
+        if type is not "json":
+            return response
 
         # in case it's a broadcast method
         if bcast and response.text == 'Error. Must be admin user.\n':
@@ -304,6 +325,21 @@ class SessionManager:
 
         return response  # return the content
 
+    def send_topology(self, radio_ip, action: str = "save", node_db: Optional[dict] = None):
+        """
+        Update node positions by leveraging the generic send_request method.
+
+        :param radio_ip: IP address of the target device.
+        :param action: Action to perform (e.g., "save").
+        :param node_db: Node database containing position data.
+        :return: Response from the server.
+        """
+        session = self.get_session(radio_ip)
+        content = request_builder.node_position(radio_ip, action, node_db)
+
+        # Send the request using the generic method
+        return self._sender_wrapper(radio_ip, session, content, False, 1)
+
     def clear_session(self, radio_ip):
         del self.device_sessions[radio_ip]
 
@@ -311,8 +347,7 @@ class SessionManager:
 def main():
     # = "{\\\"323285\\\": \\\"lev100\\\"}"
     lev = 1
-    creds = Credentials(username="admin", password="HelloWorld")
-
+    creds = Credentials(username="admin", password="admin")
     session_manager = SessionManager(version=4, credentials=creds)
     response = session_manager.send_commands_ip(["freq"], "172.20.241.202", [[]])
 
