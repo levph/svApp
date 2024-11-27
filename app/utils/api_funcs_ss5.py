@@ -155,7 +155,6 @@ class RadioManager:
         finally:
             await websocket.close()
 
-
     # TODO: test new offline feature
     async def get_net_data(self):
         """
@@ -172,8 +171,10 @@ class RadioManager:
 
             # remove expired ips
             timestamp = time.time()
+            previous_offline = self._offline_ips.copy()
             self._offline_ips = [offline for offline in self._offline_ips if
                                  timestamp - offline.time < self._offline_timeout]
+            expired_ips_flag = len(previous_offline) != len(self._offline_ips)
 
             net_change_flag = False
             # check if there was change in iplist
@@ -231,7 +232,9 @@ class RadioManager:
             self.set_batteries(known_batteries)
             self.set_ip_list(ip_list)
             self.set_node_list(node_list)
-            return SocketMsg(type="net_data", data=msg, has_changed=net_change_flag)
+
+            has_changed = expired_ips_flag or net_change_flag
+            return SocketMsg(type="net_data", data=msg, has_changed=has_changed)
         except Exception as e:
             raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
 
