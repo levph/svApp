@@ -1,14 +1,15 @@
 import asyncio
+import json
+import time
+from typing import Optional
 
 import requests
-import json
 from fastapi import WebSocket, WebSocketDisconnect
 from requests import Timeout
-import time
+from utils.fa_models import *
+# from utils.fa_models import Credentials, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
+#     NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, OfflineIp, Topology, NodePos
 from utils.send_commands import SessionManager
-from typing import Optional
-from utils.fa_models import Credentials, NodeNames, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
-    NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, OfflineIp, Topology, NodePos
 
 
 class RadioManager:
@@ -120,20 +121,33 @@ class RadioManager:
         res = self.session_manager.send_topology(self.radio_ip, action="save", node_db=node_db)
         return {"Success"} if res else {"Fail"}
 
+    def _format_topology(self, node_db: dict) -> Topology:
+        """
+        Parse topology from device flash memory
+        :param node_db:
+        :return:
+        """
+        node_list = []
+        for node_id, pos in node_db.items():
+            node_ip = self.node_id_to_ip([int(node_id)], self.version)
+            node_list.append(NodePos(id=int(node_id), ip=node_ip, pos=(pos["pos"]["x"], pos["pos"]["y"])))
+
+        return Topology(device_list=node_list)
+
     def get_topology(self) -> Topology:
         """
         Get topology of network
         :return:
         """
-
+        # load saved topology from connected device memory
         res = self.session_manager.send_topology(self.radio_ip, action="load")
+
+        # if no topology was found
         if not res:
             return Topology(device_list=[])
+
         node_db = res["nodeDB"]
-        node_list = []
-        for node_id, pos in node_db.items():
-            node_list.append(NodePos(id=int(node_id), pos=(pos["pos"]["x"], pos["pos"]["y"])))
-        return Topology(device_list=node_list)
+        return self._format_topology(node_db)
 
     def get_silvus_gui_url(self) -> str:
         """

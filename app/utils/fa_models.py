@@ -57,6 +57,7 @@ class LogInResponse(BaseModel):
 
 class NodePos(BaseModel):
     id: int
+    ip: str
     pos: tuple[float, float]
 
 
