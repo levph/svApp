@@ -129,7 +129,7 @@ class RadioManager:
         """
         node_list = []
         for node_id, pos in node_db.items():
-            node_ip = self.node_id_to_ip([int(node_id)], self.version)
+            node_ip = self.node_id_to_ip([int(node_id)], self.version)[0]
             node_list.append(NodePos(id=int(node_id), ip=node_ip, pos=(pos["pos"]["x"], pos["pos"]["y"])))
 
         return Topology(device_list=node_list)
