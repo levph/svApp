@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Optional
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -85,6 +86,13 @@ class SocketMsg(BaseModel):
     has_changed: Optional[bool] = None
 
 
+class DiscoveryResult(BaseModel):
+    """base model to store discovery results."""
+    ip_address: Optional[str] = None
+    version: Optional[int] = None
+    discovery_time: Optional[float] = None
+
+
 class Credentials(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
@@ -134,3 +142,49 @@ class Setting(BaseModel):
 class OfflineIp(BaseModel):
     status: Status
     time: float
+
+
+class ResponseType(str, Enum):
+    """Enumeration for response types."""
+    SUCCESS = "Success"
+    ERROR = "Error"
+
+
+class DeviceInfo(BaseModel):
+    """Model for device information."""
+    ip: str
+    is_protected: int = 0
+
+
+class RadioDiscoveryResponse(BaseModel):
+    """Base model for radio discovery responses."""
+    type: ResponseType
+    msg: dict | DeviceInfo
+
+
+class ErrorDetail(BaseModel):
+    """Model for error details."""
+    error: str
+    details: Optional[str] = None
+
+
+class RadioDiscoveryError(Exception):
+    """Custom exception for radio discovery errors."""
+    pass
+
+
+RADIO_DISCOVERY_RESPONSES = {
+        200: {
+            "description": "Successfully discovered radio device",
+            "model": RadioDiscoveryResponse
+        },
+        404: {
+            "description": "No radio device found",
+            "model": RadioDiscoveryResponse
+        },
+        500: {
+            "description": "Internal server error",
+            "model": RadioDiscoveryResponse
+        }
+    }
+
