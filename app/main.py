@@ -54,35 +54,17 @@ async def find_ip() -> RadioDiscoveryResponse:
         discovery_result = radio_sniffer.discover_radio()
 
         if not discovery_result.ip_address:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=ErrorDetail(
-                    error="DeviceNotFound",
-                    details="No radio device detected on the network"
-                ).dict()
-            )
+            raise ErrorResponse(msg="Couldn't find device", status_code=status.HTTP_404_NOT_FOUND, err_type="DeviceNotFound")
 
         return RadioDiscoveryResponse(type=ResponseType.SUCCESS,
                                       msg=DeviceInfo(ip=discovery_result.ip_address, is_protected=0))
 
     except RadioDiscoveryError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ErrorDetail(
-                error="DiscoveryError",
-                details=str(e)
-            ).dict()
-        )
+        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND, err_type="DiscoveryError")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ErrorDetail(
-                error="InternalError",
-                details="An unexpected error occurred during device discovery"
-            ).dict()
-        )
+        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND, err_type="InternalError")
 
 
 @app.post("/log-in")

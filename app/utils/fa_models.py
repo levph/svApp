@@ -45,9 +45,15 @@ class IpCredentials(BaseModel):
     radio_ip: str
 
 
+class ResponseType(str, Enum):
+    """Enumeration for response types."""
+    SUCCESS = "Success"
+    ERROR = "Error"
+
+
 class ErrorResponse(HTTPException):
-    def __init__(self, msg: str, status_code: int = 500):
-        details = {"type": "Fail", "msg": msg}
+    def __init__(self, msg: str, status_code: int = 500, err_type: Optional[str] = ResponseType.ERROR):
+        details = {"type": err_type, "msg": msg}
         super().__init__(status_code=status_code, detail=details)
 
 
@@ -144,12 +150,6 @@ class OfflineIp(BaseModel):
     time: float
 
 
-class ResponseType(str, Enum):
-    """Enumeration for response types."""
-    SUCCESS = "Success"
-    ERROR = "Error"
-
-
 class DeviceInfo(BaseModel):
     """Model for device information."""
     ip: str
@@ -158,8 +158,12 @@ class DeviceInfo(BaseModel):
 
 class RadioDiscoveryResponse(BaseModel):
     """Base model for radio discovery responses."""
-    type: ResponseType
-    msg: dict | DeviceInfo
+    type: ResponseType | str
+    msg: dict | DeviceInfo | str
+
+
+class RadioDiscoveryErrorResponse(BaseModel):
+    detail: RadioDiscoveryResponse
 
 
 class ErrorDetail(BaseModel):
@@ -174,17 +178,16 @@ class RadioDiscoveryError(Exception):
 
 
 RADIO_DISCOVERY_RESPONSES = {
-        200: {
-            "description": "Successfully discovered radio device",
-            "model": RadioDiscoveryResponse
-        },
-        404: {
-            "description": "No radio device found",
-            "model": RadioDiscoveryResponse
-        },
-        500: {
-            "description": "Internal server error",
-            "model": RadioDiscoveryResponse
-        }
+    200: {
+        "description": "Successfully discovered radio device",
+        "model": RadioDiscoveryResponse
+    },
+    404: {
+        "description": "No radio device found",
+        "model": RadioDiscoveryErrorResponse
+    },
+    500: {
+        "description": "Internal server error",
+        "model": RadioDiscoveryErrorResponse
     }
-
+}
