@@ -10,6 +10,7 @@ from utils.fa_models import *
 # from utils.fa_models import Credentials, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
 #     NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, OfflineIp, Topology, NodePos
 from utils.send_commands import SessionManager
+from utils.offline_manager import OfflineDevicesManager
 
 
 class RadioManager:
@@ -18,13 +19,10 @@ class RadioManager:
     def default_version(cls) -> int:
         return 5
 
-    @classmethod
-    def default_timeout(cls) -> int:
-        return 20
-
     def __init__(self):
         self.radio_ip: Optional[str] = None
         self.session_manager: SessionManager = SessionManager()
+        self._offline_devices: OfflineDevicesManager = OfflineDevicesManager()
         self.node_list: list[int] = []
         self.ip_list: list[str] = []
         self.node_names: dict[int, str] = {}
@@ -34,8 +32,6 @@ class RadioManager:
         self.credentials: Optional[Credentials] = None
         self.net_interval: int = 2
         self.known_batteries: dict[str, str] = {}
-        self._offline_ips: list[OfflineIp] = []
-        self._offline_timeout: int = self.default_timeout()
 
     def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
         """
@@ -199,97 +195,103 @@ class RadioManager:
 
     async def get_net_data(self):
         """
-        TODO: documentation
-        :return:
+        Retrieves and processes network data for connected devices, managing their online/offline status
+        and related metrics.
+
+        This method performs several key operations:
+        1. Discovers currently connected devices on the network
+        2. Tracks devices that go offline and handles reconnections
+        3. Maintains battery status for known devices
+        4. Collects signal-to-noise ratio (SNR) data for connected devices
+
+        Returns:
+            SocketMsg: Contains processed network data including:
+                - List of all devices (online and offline)
+                - SNR measurements between devices
+                - Change status flag indicating network topology changes
+
+        Raises:
+            ErrorResponse: If there's an error during network data collection
         """
         try:
-
-            known_batteries = self.known_batteries
-            statusim = self.statusim
-            # old_ip_list = self.ip_list.copy()
-            ip_list, node_list = self.list_devices(self.radio_ip, self.version)
-            new_ips, new_ids = [], []
-
-            # remove expired ips
+            # Get current state
+            known_batteries = self.known_batteries.copy()
+            current_statusim = self.statusim.copy()
             timestamp = time.time()
-            previous_offline = self._offline_ips.copy()
-            self._offline_ips = [offline for offline in self._offline_ips if
-                                 timestamp - offline.time < self._offline_timeout]
-            expired_ips_flag = len(previous_offline) != len(self._offline_ips)
 
-            net_change_flag = False
+            # Discover current network topology
+            ip_list, node_list = self.list_devices(self.radio_ip, self.version)
+            current_ip_mapping = {node: ip for node, ip in zip(node_list, ip_list)}
+
+            # remove expired ips, if any
+            net_change_flag = self._offline_devices.delete_expired(timestamp)
+
             # check if there was change in iplist
             if set(self.ip_list) != set(ip_list):
                 net_change_flag = True
+                current_statusim, known_batteries = self._process_network_changes(current_ip_mapping, current_statusim,
+                                                                                  timestamp, known_batteries)
 
-                # offline logic
-                # add ips that disconnected now, change their online status to false
-                for status in statusim:
-                    if status.ip not in ip_list:
-                        status.is_online = False
-                        self._offline_ips.append(OfflineIp(status=status, time=timestamp))
-
-                new_stuff = [(ip, iid) for ip, iid in zip(ip_list, node_list) if ip not in self.ip_list]
-                if new_stuff:
-                    new_ips, new_ids = zip(*new_stuff)
-                    new_ips, new_ids = list(new_ips), list(new_ids)
-
-                new_statusim = []
-                back_online = []
-                if new_ips:
-
-                    items_to_remove = []
-                    # back online check
-                    for offline in self._offline_ips:
-                        if offline.status.ip in new_ips:
-                            offline.status.is_online = True
-                            back_online.append(offline.status)
-                            new_ips.remove(offline.status.ip)
-                            items_to_remove.append(offline)
-
-                    # remove back online devices from offline list
-                    for item in items_to_remove:
-                        self._offline_ips.remove(item)
-
-                    new_statusim = self.get_ptt_groups(new_ips, new_ids, self.node_names)
-
-                known_batteries = {ip: percent for ip, percent in known_batteries.items() if
-                                   ip in ip_list}
-                statusim = [status for status in statusim if status.ip in ip_list] + new_statusim + back_online
-
-            snrs = []
-            if len(self.ip_list) > 1:
-                snrs = self.net_status()
-
-            device_list = statusim + [offline.status for offline in self._offline_ips]
-
-            for status in device_list:
-                if status.ip in known_batteries:
-                    status.percent = known_batteries[status.ip]
-
+            # get snrs between devices
+            snrs = self.net_status() if len(self.ip_list) > 1 else []
+            device_list = self._create_device_list(current_statusim, known_batteries)
             msg = NetDataMsg(device_list=device_list, snr_list=snrs)
 
-            self.set_statusim(statusim)
-            self.set_batteries(known_batteries)
-            self.set_ip_list(ip_list)
-            self.set_node_list(node_list)
+            self.statusim = current_statusim
+            self.known_batteries = known_batteries
+            self.ip_list = ip_list
+            self.node_list = node_list
 
-            has_changed = expired_ips_flag or net_change_flag
-            return SocketMsg(type="net_data", data=msg, has_changed=has_changed)
+            return SocketMsg(type="net_data", data=msg, has_changed=net_change_flag)
         except Exception as e:
             raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
 
-    def set_node_list(self, nodelist: list[int]):
-        self.node_list = nodelist
+    def _process_network_changes(self, current_ip_mapping: dict[int, str], current_statusim: list[Status],
+                                 timestamp: time.time, known_batteries: dict) -> tuple[list[Status], dict]:
+        """
+        Processes changes in network topology, handling newly connected, reconnected and disconnected devices.
+        :param current_ip_mapping:
+        :param current_statusim:
+        :param timestamp:
+        :param known_batteries:
+        :return:
+        """
+        # extract new devices
+        new_ip_mapping = {iid: ip for iid, ip in current_ip_mapping.items() if ip not in self.ip_list}
 
-    def set_ip_list(self, iplist: list[str]):
-        self.ip_list = iplist
+        # add ips that disconnected now, change their online status to false
+        current_statusim = self._offline_devices.add_offline_devices(current_statusim,
+                                                                     list(current_ip_mapping.values()), timestamp)
 
-    def set_batteries(self, batteries: dict[str, str]):
-        self.known_batteries = batteries
+        if new_ip_mapping:
+            back_online, new_ip_mapping = self._offline_devices.pop_reconnected(new_ip_mapping)
+            current_statusim += back_online + self.get_ptt_groups(ips=list(new_ip_mapping.values()),
+                                                                  ids=list(new_ip_mapping.keys()),
+                                                                  names=self.node_names)
 
-    def set_statusim(self, statusim: list[Status]):
-        self.statusim = statusim
+        # forget disconnected devices' batteries
+        known_batteries = {ip: percent for ip, percent in known_batteries.items() if
+                           ip in current_ip_mapping.values()}
+
+        return current_statusim, known_batteries
+
+    def _create_device_list(self, current_statusim: list[Status], known_batteries: dict) -> list[Status]:
+        """
+        Creates a comprehensive list of all devices with their current status.
+
+        :param current_statusim:
+        :param known_batteries:
+        :return:
+        """
+        # add offline statuses to device list
+        device_list = current_statusim + [offline.status for offline in self._offline_devices.offline_devices]
+
+        # TODO: handle devices better, known_batteries is ugly
+        for status in device_list:
+            if status.ip in known_batteries:
+                status.percent = known_batteries[status.ip]
+
+        return device_list
 
     def get_interval(self) -> Interval:
         return Interval(value=self.net_interval)

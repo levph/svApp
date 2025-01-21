@@ -10,16 +10,25 @@ class Content(BaseModel):
     headers: dict
 
 
-def _build_load_request(radio_ip):
-    api_endpoint = f"http://{radio_ip}/cgi-bin/nodePositionHandler.pyc"
+def position_endpoint(ip: str, version: int) -> str:
+    """
+
+    :param ip:
+    :param version:
+    :return:
+    """
+    return f"http://{ip}/cgi-bin/nodePositionHandler.py{'c' if version == 5 else ''}"
+
+
+def _build_load_request(radio_ip: str, version: int) -> Content:
+    url = position_endpoint(radio_ip, version)
     payload = {'action': 'load'}
     headers = {}
-    return Content(endpoint=api_endpoint, payload=payload, headers=headers)
+    return Content(endpoint=url, payload=payload, headers=headers)
 
 
-def _build_save_request(radio_ip, node_db):
-    url = f"http://{radio_ip}/cgi-bin/nodePositionHandler.pyc"
-
+def _build_save_request(radio_ip: str, node_db, version: int):
+    url = position_endpoint(radio_ip, version)
     pos_json = json.dumps({
         "version": 0.1,
         "nodeDB": node_db
@@ -31,9 +40,10 @@ def _build_save_request(radio_ip, node_db):
     return Content(endpoint=url, payload=payload, headers=headers)
 
 
-def node_position(radio_ip: str, action: str, node_db: Optional[dict] = None) -> Content:
+def node_position(radio_ip: str, action: str, node_db: Optional[dict] = None, version: int = 5) -> Content:
     """
     Request builder for node position and topology API requests.
+    :param version:
     :param radio_ip:
     :param action:
     :param node_db: example = {
@@ -44,9 +54,9 @@ def node_position(radio_ip: str, action: str, node_db: Optional[dict] = None) ->
     """
 
     if action == "load":
-        return _build_load_request(radio_ip)
+        return _build_load_request(radio_ip, version)
     elif action == "save":
-        return _build_save_request(radio_ip,node_db)
+        return _build_save_request(radio_ip, node_db, version)
 
     raise ValueError("Incorrect action")
 
@@ -69,74 +79,3 @@ def build_broadcast_payload(methods: list[str], params: list[list], node_ids: li
     api_list = [{"method": methods[i], "params": params[i]} for i in range(len(methods))]
     return json.dumps({"apis": [{"method": "deferred_execution_api", "params": {"version": "1", "api_list": api_list}}],
                        "nodeids": node_ids})
-
-
-def build_multipart_payload(action: str, node_db: dict) -> str:
-    """
-    Build a multipart/form-data payload for topology requests.
-    """
-    boundary = "----WebKitFormBoundaryvonoWFP0xDp5EfNG"
-    pos_json = json.dumps({"version": 0.1, "nodeDB": node_db})
-    return (
-        f"{boundary}\r\n"
-        f'Content-Disposition: form-data; name="action"\r\n\r\n{action}\r\n'
-        f"{boundary}\r\n"
-        f'Content-Disposition: form-data; name="posJson"\r\n\r\n{pos_json}\r\n'
-        f"{boundary}--\r\n"
-    )
-
-
-def build_headers(boundary: str, radio_ip: str) -> dict:
-    """
-    Build headers for multipart/form-data requests.
-    """
-    return {
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Connection": "keep-alive",
-        "Content-Type": f"multipart/form-data; boundary={boundary}",
-        "Origin": f"http://{radio_ip}",
-        "Referer": f"http://{radio_ip}/",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-    }
-
-
-def get_command_handler(command_type: str):
-    """
-    Retrieve the appropriate handler function for the given command type.
-    """
-    command_handlers = {
-        "json_rpc": _handle_json_rpc,
-        "broadcast": _handle_broadcast,
-        "topology": _handle_topology,
-    }
-    if command_type not in command_handlers:
-        raise ValueError(f"Unknown command type: {command_type}")
-    return command_handlers[command_type]
-
-
-def _handle_json_rpc(methods, radio_ip, params, **kwargs):
-    payload = build_json_rpc_payload(methods, params)
-    headers = {"Content-Type": "application/json"}
-    endpoint = f"http://{radio_ip}/cgi-bin/streamscape_api"
-    return payload, headers, endpoint
-
-
-def _handle_broadcast(methods, radio_ip, params, **kwargs):
-    if "nodelist" not in kwargs:
-        raise ValueError("Broadcast requests require a node list.")
-    payload = build_broadcast_payload(methods, params, kwargs["nodelist"])
-    headers = {"Content-Type": "application/json"}
-    endpoint = f"http://{radio_ip}/cgi-bin/bcast_enc.pyc"
-    return payload, headers, endpoint
-
-
-def _handle_topology(methods, radio_ip, params, **kwargs):
-    if "action" not in kwargs or "node_db" not in kwargs:
-        raise ValueError("Topology requests require 'action' and 'node_db'.")
-    boundary = "----WebKitFormBoundaryvonoWFP0xDp5EfNG"
-    payload = build_multipart_payload(kwargs["action"], kwargs["node_db"])
-    headers = build_headers(boundary, radio_ip)
-    endpoint = f"http://{radio_ip}/cgi-bin/nodePositionHandler.pyc"
-    return payload, headers, endpoint

@@ -338,7 +338,7 @@ class SessionManager:
         if action == "save":
             msg_type += "-save"
         session = self.get_session(radio_ip)
-        content = request_builder.node_position(radio_ip, action, node_db)
+        content = request_builder.node_position(radio_ip, action, node_db, self.version)
         # Send the request using the generic method
         return self._sender_wrapper(radio_ip, session=session.session, content=content, bcast=False,
                                     multiple_methods=False,
