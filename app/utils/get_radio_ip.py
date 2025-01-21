@@ -1,107 +1,228 @@
-"""
-This script is sniffing for the silvus discovery message.
-finds the IP of the connected radio.
-
-author: lev
-"""
-
-from scapy.all import *
-from scapy.all import sniff, Ether, get_working_ifaces
-import psutil
-import socket
-from scapy.all import sniff, get_if_addr, get_if_list
+from typing import Optional, List, Tuple, Any
+from functools import wraps
 import threading
+import logging
+import time
 
-# Lock to control access to radio ip
-lock = threading.Lock()
+from scapy.all import sniff, Ether, IP, UDP, conf, get_working_ifaces
+from scapy.packet import Packet
 
-# Condition variable to notify all threads to stop
-stop_condition = threading.Condition()
+from utils.fa_models import DiscoveryResult, RadioDiscoveryError
 
-# Define the MAC prefix and IP range
-radio_ip = None
-version = None
-# mac_prefix = ["c4:7c:8d"]
-ip_range = "172."
-# broadcast_mac = "ff:ff:ff:ff:ff:ff"
-dst_ips = ["172.20.255.255", "172.31.255.255"]
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 
-def packet_callback(packet):
+def retry_on_exception(retries: int = 3, delay: float = 1.0):
+    """Decorator for retrying operations that might fail temporarily."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < retries - 1:
+                        logging.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay} seconds...")
+                        time.sleep(delay)
+            logging.error(f"All {retries} attempts failed. Last error: {str(last_exception)}")
+            raise last_exception
+
+        return wrapper
+
+    return decorator
+
+
+
+class RadioIpSniffer:
     """
-    The packet processing callback for sniff.
-    Looking for Silvus discovery message
-    From what we've seen it's UDP message, MAC Broadcast
-    and source is expected to start with the silvus IP and MAC prefixes defined as global variables
-    will stop sniffing once conditions are met.
+    A network sniffer for discovering radio devices on specific network interfaces.
 
-    :param x: The packet received by sniff.
-    :return: True if the packet is the one we're looking for, False otherwise.
+    This class implements packet sniffing functionality to discover radio devices
+    broadcasting discovery messages on specified network interfaces.
     """
-    global radio_ip, version
-    lev=1
-    if packet.haslayer(Ether) and packet.haslayer(IP) and packet.haslayer(UDP):
-        src_ip = packet[IP].src
-        dst_ip = packet[IP].dst
 
-        # V4 discovery message
-        if any(dst_ip.lower().startswith(dst) for dst in dst_ips) and src_ip.startswith(ip_range):
-            with lock:
-                if radio_ip is None:
-                    version = 4 if "20" in dst_ip else 5
-                    print(f"Received V{version} Silvus discovery message from {src_ip}")
-                    radio_ip = src_ip
-                    with stop_condition:
-                        stop_condition.notify_all()
+    def __init__(
+            self,
+            ip_range: str = "172.",
+            dst_ips: List[str] = None,
+            sniff_timeout: int = 3
+    ) -> None:
+        """
+        Initialize the RadioIpSniffer.
+
+        Args:
+            ip_range: IP range prefix to filter source addresses
+            dst_ips: List of destination broadcast addresses to monitor
+            sniff_timeout: Timeout in seconds for each sniffing attempt
+        """
+        self.logger = logging.getLogger(__name__)
+        self._ip_range = ip_range
+        self._dst_ips = dst_ips or ["172.20.255.255", "172.31.255.255"]
+        self._sniff_timeout = sniff_timeout
+
+        # Thread-safety mechanisms
+        self._lock = threading.Lock()
+        self._stop_condition = threading.Condition()
+
+        # Discovery result
+        self._discovery_result = DiscoveryResult()
+
+    def _packet_callback(self, packet: Packet) -> None:
+        """
+        Process captured packets to identify radio discovery messages.
+
+        Args:
+            packet: Captured network packet
+        """
+        try:
+            if not (packet.haslayer(Ether) and packet.haslayer(IP) and packet.haslayer(UDP)):
+                return
+
+            src_ip = packet[IP].src
+            dst_ip = packet[IP].dst
+
+            if (any(dst_ip.lower().startswith(dst) for dst in self._dst_ips) and
+                    src_ip.startswith(self._ip_range)):
+                with self._lock:
+                    if self._discovery_result.ip_address is None:
+                        version = 4 if "20" in dst_ip else 5
+                        self.logger.info(f"Received V{version} discovery message from {src_ip}")
+
+                        self._discovery_result = DiscoveryResult(
+                            ip_address=src_ip,
+                            version=version,
+                            discovery_time=time.time()
+                        )
+
+                        with self._stop_condition:
+                            self._stop_condition.notify_all()
+
+        except Exception as e:
+            self.logger.error(f"Error processing packet: {str(e)}")
+
+    @retry_on_exception(retries=3, delay=1.0)
+    def _get_working_ifaces(self) -> List[str]:
+        """
+        Get list of working network interfaces matching the target IP range.
+
+        Returns:
+            List of working interface names
+
+        Raises:
+            RadioDiscoveryError: If no suitable interfaces are found
+        """
+        try:
+            interfaces = []
+            working_ifaces = get_working_ifaces()
+
+            for iface in working_ifaces:
+                try:
+                    # Check if interface has an IP in our target range
+                    if hasattr(iface, 'ip') and iface.ip and iface.ip.startswith("172.20"):
+                        interfaces.append(iface.name)
+                except AttributeError as e:
+                    self.logger.debug(f"Skipping interface {iface}: {str(e)}")
+
+            if not interfaces:
+                raise RadioDiscoveryError("No suitable network interfaces found")
+
+            return interfaces
+
+        except Exception as e:
+            raise RadioDiscoveryError(f"Failed to get working interfaces: {str(e)}")
+
+    def _sniff_interface(self, iface: str) -> None:
+        """
+        Sniff packets on a specific interface.
+
+        Args:
+            iface: Network interface name
+        """
+        try:
+            sniff(
+                iface=iface,
+                prn=self._packet_callback,
+                stop_filter=lambda x: self._discovery_result.ip_address is not None,
+                timeout=self._sniff_timeout
+            )
+        except Exception as e:
+            self.logger.error(f"Error sniffing on interface {iface}: {str(e)}")
+
+    def discover_radio(self) -> DiscoveryResult:
+        """
+        Discover radio device by sniffing network interfaces.
+
+        Returns:
+            DiscoveryResult containing the discovered radio IP and version
+
+        Raises:
+            RadioDiscoveryError: If discovery fails
+        """
+        self._discovery_result = DiscoveryResult()
+
+        try:
+            iface_names = self._get_working_ifaces()
+            self.logger.info(f"Starting discovery on interfaces: {', '.join(iface_names)}")
+
+            if len(iface_names) == 1:
+                self._sniff_interface(str(iface_names[0]))
+            else:
+                threads = []
+                for iface in iface_names:
+                    thread = threading.Thread(
+                        target=self._sniff_interface,
+                        args=(iface,),
+                        name=f"Sniffer-{iface}"
+                    )
+                    threads.append(thread)
+                    thread.start()
+
+                for thread in threads:
+                    thread.join()
+
+            if self._discovery_result.ip_address:
+                self.logger.info(
+                    f"Radio discovered at {self._discovery_result.ip_address} "
+                    f"(Version {self._discovery_result.version})"
+                )
+            else:
+                self.logger.warning("No radio discovered during the scan")
+
+            return self._discovery_result
+
+        except Exception as e:
+            raise RadioDiscoveryError(f"Radio discovery failed: {str(e)}")
 
 
-def get_interface_by_ip(target_ip):
-    for iface_name, iface_addrs in psutil.net_if_addrs().items():
-        for addr in iface_addrs:
-            # print(f"{iface_name} IP is {addr.address}")
-            if addr.family == socket.AF_INET and addr.address.startswith(target_ip):
-                return iface_name
-    return None
+def main() -> None:
+    """Main function to demonstrate RadioIpSniffer usage."""
+    try:
+        sniffer = RadioIpSniffer()
+        result = sniffer.discover_radio()
 
+        if result.ip_address:
+            print(f"\nDiscovery successful!")
+            print(f"Radio IP: {result.ip_address}")
+            print(f"Version: {result.version}")
+            print(f"Discovery time: {time.ctime(result.discovery_time)}")
+        else:
+            print("\nNo radio discovered")
 
-def get_iface_name():
-    working_ifaces = get_working_ifaces()
-    iface_name = [iface.network_name for iface in working_ifaces if iface.ip.startswith("172.20")]
-    return iface_name
-
-
-def sniffer(if_name):
-    # sniff(iface=if_name,stop_filter=packet_callback, store=0, timeout=10)
-    sniff(iface=if_name, prn=packet_callback, stop_filter=lambda x: radio_ip is not None, timeout=3)
-
-
-def sniff_target_ip():
-    """
-    Sniffs the network for a target packet and returns the source IP address
-    when the packet is found.
-    """
-    global radio_ip, version
-    radio_ip = version = None
-
-    iface_name = get_iface_name()
-    if len(iface_name) == 1:
-        sniffer(str(iface_name[0]))
-    elif len(iface_name) > 1:
-        threads = []
-        for iface in iface_name:
-            th = threading.Thread(target=sniffer, args=(iface,))
-            threads.append(th)
-            th.start()
-
-        # Join threads to wait for them to complete
-        for thread in threads:
-            thread.join()
-
-    print(f"\nRadio IP is {radio_ip}")
-    return radio_ip, version
+    except RadioDiscoveryError as e:
+        print(f"Error during radio discovery: {str(e)}")
+    except KeyboardInterrupt:
+        print("\nDiscovery interrupted by user")
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
 
 
 if __name__ == "__main__":
-    sniff_target_ip()
-
-# sniff_target_ip()
+    main()
+    lev=1

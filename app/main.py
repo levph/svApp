@@ -1,21 +1,29 @@
 """
-Lizi v1.0 - Server home page
+Lizi v1.1.1 - Server home page
 
 
 """
-
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import asyncio
 from typing import Optional
+from logging import getLogger
 
-from utils.fa_models import BasicSettings, PttData, NodeID, Interval, IpCredentials, LogInResponse, ErrorResponse
-from utils.get_radio_ip import sniff_target_ip
+import asyncio
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+
+from utils.fa_models import *
+from utils.get_radio_ip import RadioIpSniffer
 from utils.api_funcs_ss5 import RadioManager
 import webbrowser
 
-app = FastAPI()
+# configure logging
+logger = getLogger(__name__)
+
+# FastAPI app configuration
+app = FastAPI(
+    title="Radio Discovery API",
+    description="API for discovering radio devices on the network",
+    version="1.1.1"
+)
 
 origins = [
     "http://localhost",
@@ -28,22 +36,35 @@ app.add_middleware(CORSMiddleware,
                    allow_methods=["*"],
                    allow_headers=["*"])
 
+# TODO: add DI
 radio_manager = RadioManager()  # Instantiate the RadioManager class
+radio_sniffer = RadioIpSniffer()  # Instantiate the RadioIpSniffer class
 
 
-@app.get("/ip")
-def find_ip():
+@app.get(
+    "/ip",
+    response_model=RadioDiscoveryResponse,
+    responses=RADIO_DISCOVERY_RESPONSES
+)
+async def find_ip() -> RadioDiscoveryResponse:
+    """
+    Discover radio device IP address and return details.
+    """
     try:
-        [radio_ip, _] = sniff_target_ip()
+        discovery_result = radio_sniffer.discover_radio()
+
+        if not discovery_result.ip_address:
+            raise ErrorResponse(msg="Couldn't find device", status_code=status.HTTP_404_NOT_FOUND, err_type="DeviceNotFound")
+
+        return RadioDiscoveryResponse(type=ResponseType.SUCCESS,
+                                      msg=DeviceInfo(ip=discovery_result.ip_address, is_protected=0))
+
+    except RadioDiscoveryError as e:
+        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND, err_type="DiscoveryError")
+    except HTTPException:
+        raise
     except Exception as e:
-        print("Can't find connected device\n")
-        raise ErrorResponse(msg=f"Error when scanning: {e}")
-
-    if not radio_ip:
-        print("No Radio connected.\n")
-        raise ErrorResponse(msg="Can't find a connected device.")
-
-    return LogInResponse(type="Success", msg={"ip": radio_ip, "is_protected": 0})
+        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND, err_type="InternalError")
 
 
 @app.post("/log-in")
@@ -74,6 +95,20 @@ async def open_technical_system():
     """
     url = radio_manager.get_silvus_gui_url()
     webbrowser.open(url, new=0, autoraise=True)
+
+
+@app.get("/topology")
+def load_topology() -> Topology:
+    """
+    This method attempts to load a save topology structure from device flash memory
+    :return:
+    """
+    return radio_manager.get_topology()
+
+
+@app.post("/topology")
+def save_topology(topology: Topology):
+    return radio_manager.save_topology(topology)
 
 
 @app.post("/set-label")

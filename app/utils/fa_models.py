@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Optional
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -44,9 +45,15 @@ class IpCredentials(BaseModel):
     radio_ip: str
 
 
+class ResponseType(str, Enum):
+    """Enumeration for response types."""
+    SUCCESS = "Success"
+    ERROR = "Error"
+
+
 class ErrorResponse(HTTPException):
-    def __init__(self, msg: str, status_code: int = 500):
-        details = {"type": "Fail", "msg": msg}
+    def __init__(self, msg: str, status_code: int = 500, err_type: Optional[str] = ResponseType.ERROR):
+        details = {"type": err_type, "msg": msg}
         super().__init__(status_code=status_code, detail=details)
 
 
@@ -55,12 +62,23 @@ class LogInResponse(BaseModel):
     msg: str | dict
 
 
+class NodePos(BaseModel):
+    id: int
+    ip: str
+    pos: tuple[float, float]
+
+
+class Topology(BaseModel):
+    device_list: list[NodePos]
+
+
 class Status(BaseModel):
     ip: str
     id: int
     status: list[int]
     name: str
     percent: str = "-1"
+    is_online: bool
 
 
 class NetDataMsg(BaseModel):
@@ -72,6 +90,13 @@ class SocketMsg(BaseModel):
     type: str
     data: NetDataMsg | dict[str, str]
     has_changed: Optional[bool] = None
+
+
+class DiscoveryResult(BaseModel):
+    """base model to store discovery results."""
+    ip_address: Optional[str] = None
+    version: Optional[int] = None
+    discovery_time: Optional[float] = None
 
 
 class Credentials(BaseModel):
@@ -118,3 +143,51 @@ class RadioIP(BaseModel):
 class Setting(BaseModel):
     key: str
     value: str
+
+
+class OfflineIp(BaseModel):
+    status: Status
+    time: float
+
+
+class DeviceInfo(BaseModel):
+    """Model for device information."""
+    ip: str
+    is_protected: int = 0
+
+
+class RadioDiscoveryResponse(BaseModel):
+    """Base model for radio discovery responses."""
+    type: ResponseType | str
+    msg: dict | DeviceInfo | str
+
+
+class RadioDiscoveryErrorResponse(BaseModel):
+    detail: RadioDiscoveryResponse
+
+
+class ErrorDetail(BaseModel):
+    """Model for error details."""
+    error: str
+    details: Optional[str] = None
+
+
+class RadioDiscoveryError(Exception):
+    """Custom exception for radio discovery errors."""
+    pass
+
+
+RADIO_DISCOVERY_RESPONSES = {
+    200: {
+        "description": "Successfully discovered radio device",
+        "model": RadioDiscoveryResponse
+    },
+    404: {
+        "description": "No radio device found",
+        "model": RadioDiscoveryErrorResponse
+    },
+    500: {
+        "description": "Internal server error",
+        "model": RadioDiscoveryErrorResponse
+    }
+}
