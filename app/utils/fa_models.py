@@ -81,6 +81,10 @@ class Status(BaseModel):
     is_online: bool
 
 
+class HiddenDevices(BaseModel):
+    device_list: list[Status]
+
+
 class NetDataMsg(BaseModel):
     device_list: list[Status]
     snr_list: list[dict]
@@ -154,6 +158,11 @@ class DeviceInfo(BaseModel):
     """Model for device information."""
     ip: str
     is_protected: int = 0
+
+
+class DefaultResponse(BaseModel):
+    type: ResponseType
+    msg: str
 
 
 class RadioDiscoveryResponse(BaseModel):

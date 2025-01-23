@@ -54,17 +54,20 @@ async def find_ip() -> RadioDiscoveryResponse:
         discovery_result = radio_sniffer.discover_radio()
 
         if not discovery_result.ip_address:
-            raise ErrorResponse(msg="Couldn't find device", status_code=status.HTTP_404_NOT_FOUND, err_type="DeviceNotFound")
+            raise ErrorResponse(msg="Couldn't find device", status_code=status.HTTP_404_NOT_FOUND,
+                                err_type="DeviceNotFound")
 
         return RadioDiscoveryResponse(type=ResponseType.SUCCESS,
                                       msg=DeviceInfo(ip=discovery_result.ip_address, is_protected=0))
 
     except RadioDiscoveryError as e:
-        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND, err_type="DiscoveryError")
+        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND,
+                            err_type="DiscoveryError")
     except HTTPException:
         raise
     except Exception as e:
-        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND, err_type="InternalError")
+        raise ErrorResponse(msg=str(e), status_code=status.HTTP_500_INTERNAL_SERVER_ERROR_NOT_FOUND,
+                            err_type="InternalError")
 
 
 @app.post("/log-in")
@@ -85,6 +88,16 @@ def log_out():
     :return: string to indicate successful exit
     """
     return radio_manager.log_out()
+
+
+@app.get("/hidden")
+def get_hidden():
+    return radio_manager.hidden_devices
+
+
+@app.post("/hide/{device_id}")
+def hide_device(device_id: int):
+    radio_manager.hide(device_id)
 
 
 @app.get("/silvus-tech-gui")

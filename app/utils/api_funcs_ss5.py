@@ -4,7 +4,7 @@ import time
 from typing import Optional
 
 import requests
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect, HTTPException
 from requests import Timeout
 from utils.fa_models import *
 # from utils.fa_models import Credentials, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
@@ -23,15 +23,26 @@ class RadioManager:
         self.radio_ip: Optional[str] = None
         self.session_manager: SessionManager = SessionManager()
         self._offline_devices: OfflineDevicesManager = OfflineDevicesManager()
+        self._hidden_devices: list[Status] = []
         self.node_list: list[int] = []
         self.ip_list: list[str] = []
-        self.node_names: dict[int, str] = {}
+        self._node_names: dict[int, str] = {}
         self.statusim: list[Status] = []
         self.version: int = self.default_version()
         self.cam_data = None
         self.credentials: Optional[Credentials] = None
         self.net_interval: int = 2
         self.known_batteries: dict[str, str] = {}
+
+    @property
+    def hidden_devices(self) -> HiddenDevices:
+        """
+        List of currently tracked hidden devices.
+
+        Returns:
+            HiddenDevices: BaseModel object with hidden devices list
+        """
+        return HiddenDevices(device_list=self._hidden_devices)
 
     def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
         """
@@ -79,7 +90,7 @@ class RadioManager:
                 raise ErrorResponse(msg=f"Unknown Error: {e}")
 
         self.radio_ip = ip
-        self.node_names = nodes_names
+        self._node_names = nodes_names
         self.node_list = node_list
         self.statusim = statusim
         self.ip_list = ip_list
@@ -94,7 +105,7 @@ class RadioManager:
         self.session_manager = SessionManager()
         self.node_list = []
         self.ip_list = []
-        self.node_names = {}
+        self._node_names = {}
         self.statusim = []
         self.version = 5  # default
         self.cam_data = None
@@ -103,6 +114,15 @@ class RadioManager:
         self.known_batteries = {}
 
         return {"Success"}
+
+    def hide(self, device_id: int) -> None:
+
+        for st in self.statusim:
+            if st.id == device_id:
+                self._hidden_devices.append(st)
+                return
+
+        raise HTTPException(status_code=404, detail=f"Node {device_id} doesn't exist")
 
     def save_topology(self, topology: Topology):
         """
@@ -161,7 +181,7 @@ class RadioManager:
         res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
 
         # update name in all variables
-        self.node_names[node.id] = node.label
+        self._node_names[node.id] = node.label
         for status in self.statusim:
             if status.id == node.id:
                 status.name = node.label
@@ -267,7 +287,7 @@ class RadioManager:
             back_online, new_ip_mapping = self._offline_devices.pop_reconnected(new_ip_mapping)
             current_statusim += back_online + self.get_ptt_groups(ips=list(new_ip_mapping.values()),
                                                                   ids=list(new_ip_mapping.keys()),
-                                                                  names=self.node_names)
+                                                                  names=self._node_names)
 
         # forget disconnected devices' batteries
         known_batteries = {ip: percent for ip, percent in known_batteries.items() if
@@ -291,7 +311,15 @@ class RadioManager:
             if status.ip in known_batteries:
                 status.percent = known_batteries[status.ip]
 
-        return device_list
+        return self._remove_hidden(device_list)
+
+    def _remove_hidden(self, device_list: list[Status]) -> list[Status]:
+        """
+        removes hidden devices from device list
+        :param device_list:
+        :return: filtered device_list
+        """
+        return [device for device in device_list if device.id in self._hidden_devices]
 
     def get_interval(self) -> Interval:
         return Interval(value=self.net_interval)
@@ -472,13 +500,16 @@ class RadioManager:
         """
 
         def extract_snr(data):
-            node_iids = []
             min_snr = {}
             for node in data:
-                node_iids.append(int(node["id"]))
+                if int(node["id"]) in self._hidden_devices:
+                    continue
                 for adjacency in node.get("adjacencies", []):
                     nodeTo = adjacency["nodeTo"]
                     nodeFrom = adjacency["nodeFrom"]
+                    # ignore edges containing hidden devices
+                    if int(nodeTo) in self._hidden_devices or int(nodeFrom) in self._hidden_devices:
+                        continue
                     snr_key = f"$snr_{nodeFrom}_{nodeTo}"
                     if snr_key in adjacency["data"]:
                         snr = int(adjacency["data"][snr_key])
