@@ -100,6 +100,11 @@ def hide_device(device_id: int):
     radio_manager.hide(device_id)
 
 
+@app.post("/unhide/{device_id}")
+def unhide_device(device_id: int):
+    radio_manager.unhide(device_id)
+
+
 @app.get("/silvus-tech-gui")
 async def open_technical_system():
     """
@@ -194,18 +199,6 @@ async def get_battery():
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket route, delegates handling to ApiService."""
     await radio_manager.websocket_handler(websocket)
-
-
-@app.post("/get-ptt-groups")
-async def get_ptt_group():
-    """
-    ASSUME NOT USED
-    :return:
-    """
-    try:
-        return await radio_manager.get_ptt_groups()
-    except Exception as e:
-        raise ErrorResponse(msg=str(e))
 
 
 @app.post("/set-ptt-groups")

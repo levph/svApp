@@ -23,7 +23,7 @@ class RadioManager:
         self.radio_ip: Optional[str] = None
         self.session_manager: SessionManager = SessionManager()
         self._offline_devices: OfflineDevicesManager = OfflineDevicesManager()
-        self._hidden_devices: list[Status] = []
+        self._hidden_devices: list[int] = []
         self.node_list: list[int] = []
         self.ip_list: list[str] = []
         self._node_names: dict[int, str] = {}
@@ -42,7 +42,7 @@ class RadioManager:
         Returns:
             HiddenDevices: BaseModel object with hidden devices list
         """
-        return HiddenDevices(device_list=self._hidden_devices)
+        return HiddenDevices(device_list=self._statuses_by_id(self._hidden_devices))
 
     def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
         """
@@ -116,13 +116,25 @@ class RadioManager:
         return {"Success"}
 
     def hide(self, device_id: int) -> None:
+        """
 
-        for st in self.statusim:
-            if st.id == device_id:
-                self._hidden_devices.append(st)
-                return
+        :param device_id:
+        :return:
+        """
+        if device_id not in self.node_list:
+            raise HTTPException(status_code=404, detail=f"Node {device_id} doesn't exist")
 
-        raise HTTPException(status_code=404, detail=f"Node {device_id} doesn't exist")
+        self._hidden_devices.append(device_id)
+        return
+
+    def unhide(self, device_id: int) -> None:
+        """
+        Unhides device by id
+        :param self:
+        :param device_id:
+        :return:
+        """
+        self._hidden_devices.remove(device_id)
 
     def save_topology(self, topology: Topology):
         """
@@ -319,7 +331,7 @@ class RadioManager:
         :param device_list:
         :return: filtered device_list
         """
-        return [device for device in device_list if device.id in self._hidden_devices]
+        return [device for device in device_list if device.id not in self._hidden_devices]
 
     def get_interval(self) -> Interval:
         return Interval(value=self.net_interval)
@@ -492,6 +504,13 @@ class RadioManager:
                 cameras.append(camera)
 
         return cameras
+
+    @staticmethod
+    def _get_status_by_id(status_list: list[Status], iid: int) -> Status | None:
+        for status in status_list:
+            if status.id == iid:
+                return status
+        return None
 
     def net_status(self) -> list[dict]:
         """
@@ -701,3 +720,6 @@ class RadioManager:
         response = self.session_manager.send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
 
         return 4 if "v4" in response else 5
+
+    def _statuses_by_id(self, ids: list[int]):
+        return [status for status in self.statusim if status.id in ids]
