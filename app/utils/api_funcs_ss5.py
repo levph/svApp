@@ -99,7 +99,7 @@ class RadioManager:
 
         return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 0})
 
-    def log_out(self):
+    def log_out(self) -> None:
 
         self.radio_ip: None
         self.session_manager = SessionManager()
@@ -113,8 +113,6 @@ class RadioManager:
         self.net_interval = 2
         self.known_batteries = {}
 
-        return {"Success"}
-
     def hide(self, device_id: int) -> None:
         """
 
@@ -127,14 +125,14 @@ class RadioManager:
         self._hidden_devices.append(device_id)
         return
 
-    def unhide(self, device_id: int) -> None:
+    def unhide(self, device_ids: list[int]) -> None:
         """
         Unhides device by id
+        :param device_ids:
         :param self:
-        :param device_id:
         :return:
         """
-        self._hidden_devices.remove(device_id)
+        self._hidden_devices = [device for device in self._hidden_devices if device not in device_ids]
 
     def save_topology(self, topology: Topology):
         """
@@ -182,7 +180,7 @@ class RadioManager:
         Return URL of technician mode
         :return:
         """
-        return f"http://{self.radio_ip}"
+        return GUI_URL.format(self.radio_ip)
 
     def set_label(self, node: NodeID) -> set[str]:
         """

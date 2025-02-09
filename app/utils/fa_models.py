@@ -186,6 +186,10 @@ class RadioDiscoveryError(Exception):
     pass
 
 
+class UnhideRequest(BaseModel):
+    device_ids: list[int]
+
+
 RADIO_DISCOVERY_RESPONSES = {
     200: {
         "description": "Successfully discovered radio device",
@@ -200,3 +204,5 @@ RADIO_DISCOVERY_RESPONSES = {
         "model": RadioDiscoveryErrorResponse
     }
 }
+
+GUI_URL = "http://{}"

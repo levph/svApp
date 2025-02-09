@@ -87,7 +87,7 @@ def log_out():
     will zeroize global variables and finish secure session if it exists
     :return: string to indicate successful exit
     """
-    return radio_manager.log_out()
+    radio_manager.log_out()
 
 
 @app.get("/hidden")
@@ -100,9 +100,9 @@ def hide_device(device_id: int):
     radio_manager.hide(device_id)
 
 
-@app.post("/unhide/{device_id}")
-def unhide_device(device_id: int):
-    radio_manager.unhide(device_id)
+@app.post("unhide")
+def unhide_device(request: UnhideRequest):
+    radio_manager.unhide(request.device_ids)
 
 
 @app.get("/silvus-tech-gui")
