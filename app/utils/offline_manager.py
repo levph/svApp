@@ -1,6 +1,6 @@
 import time
 
-from utils.fa_models import OfflineIp, Status
+from utils.fa_models import OfflineDevice, Status
 
 
 class OfflineDevicesManager:
@@ -36,10 +36,10 @@ class OfflineDevicesManager:
         Initializes a new OfflineDevicesManager with default settings.
         Sets up empty offline devices list and default timeout value.
         """
-        self._offline_devices: list[OfflineIp] = []
+        self._offline_devices: list[OfflineDevice] = []
         self._timeout = self.default_timeout()
 
-    def __iadd__(self, other: OfflineIp) -> 'OfflineDevicesManager':
+    def __iadd__(self, other: OfflineDevice) -> 'OfflineDevicesManager':
         """
         Implements the += operator to add a new offline device.
 
@@ -54,7 +54,7 @@ class OfflineDevicesManager:
 
     # Properties
     @property
-    def offline_devices(self) -> list[OfflineIp]:
+    def offline_devices(self) -> list[OfflineDevice]:
         """
         List of currently tracked offline devices.
 
@@ -64,7 +64,7 @@ class OfflineDevicesManager:
         return self._offline_devices
 
     @offline_devices.setter
-    def offline_devices(self, devices: list[OfflineIp]) -> None:
+    def offline_devices(self, devices: list[OfflineDevice]) -> None:
         """
         Updates the list of offline devices.
 

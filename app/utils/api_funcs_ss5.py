@@ -11,6 +11,7 @@ from utils.fa_models import *
 #     NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, OfflineIp, Topology, NodePos
 from utils.send_commands import SessionManager
 from utils.offline_manager import OfflineDevicesManager
+from utils.radio_status_database import StatusDatabase
 
 
 class RadioManager:
@@ -27,6 +28,7 @@ class RadioManager:
         self.node_list: list[int] = []
         self.ip_list: list[str] = []
         self._node_names: dict[int, str] = {}
+        self._statusim: StatusDatabase = StatusDatabase()
         self.statusim: list[Status] = []
         self.version: int = self.default_version()
         self.cam_data = None
@@ -92,7 +94,7 @@ class RadioManager:
         self.radio_ip = ip
         self._node_names = nodes_names
         self.node_list = node_list
-        self.statusim = statusim
+        self._statusim += statusim
         self.ip_list = ip_list
         self.version = version
         self.credentials = creds
@@ -106,7 +108,7 @@ class RadioManager:
         self.node_list = []
         self.ip_list = []
         self._node_names = {}
-        self.statusim = []
+        self._statusim = None
         self.version = 5  # default
         self.cam_data = None
         self.credentials = None
@@ -182,7 +184,7 @@ class RadioManager:
         """
         return GUI_URL.format(self.radio_ip)
 
-    def set_label(self, node: NodeID) -> set[str]:
+    def set_label(self, node: NodeID) -> None:
         """
         Change label of single device in current radio
         :param node:
@@ -190,13 +192,12 @@ class RadioManager:
         """
         res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
 
+        if not res:
+            raise HTTPException(status_code=404, detail=f"Node {node.id} doesn't exist")
+
         # update name in all variables
         self._node_names[node.id] = node.label
-        for status in self.statusim:
-            if status.id == node.id:
-                status.name = node.label
-
-        return {"Success"} if res else {"Fail"}
+        self._statusim[node.id].name = node.label
 
     async def run_task(self, websocket: WebSocket, func, interval: int):
         """Run the specified function at a given interval and send results via WebSocket."""
@@ -570,7 +571,6 @@ class RadioManager:
         global_max_group = 0
         # parser for silvus ptt group!
         for radio_index, radio_ip in enumerate(ips):
-            # TODO: check output, if one device has different password we're fucked:)
             ptt_groups = self.session_manager.send_commands_ip(methods=["ptt_active_mcast_group"], radio_ip=radio_ip,
                                                                params=[[]],
                                                                param_flag=1)[0]

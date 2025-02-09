@@ -149,8 +149,8 @@ class Setting(BaseModel):
     value: str
 
 
-class OfflineIp(BaseModel):
-    status: Status
+class OfflineDevice(BaseModel):
+    id: int
     time: float
 
 

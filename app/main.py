@@ -135,7 +135,7 @@ def set_label(node: NodeID):
     This method sets label for given device id
     :return:
     """
-    return radio_manager.set_label(node)
+    radio_manager.set_label(node)
 
 
 @app.get("/net-data")
