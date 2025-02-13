@@ -95,9 +95,9 @@ def get_hidden():
     return radio_manager.hidden_devices
 
 
-@app.post("/hide/{device_id}")
-def hide_device(device_id: int):
-    radio_manager.hide(device_id)
+@app.post("hide")
+def hide_device(request: HideRequest):
+    radio_manager.hide(request.device_id)
 
 
 @app.post("unhide")

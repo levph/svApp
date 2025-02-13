@@ -186,6 +186,10 @@ class RadioDiscoveryError(Exception):
     pass
 
 
+class HideRequest(BaseModel):
+    device_id: int
+
+
 class UnhideRequest(BaseModel):
     device_ids: list[int]
 
