@@ -79,6 +79,7 @@ class Status(BaseModel):
     name: str
     percent: str = "-1"
     is_online: bool
+    disconnect_time: float = -1.0
 
 
 class HiddenDevices(BaseModel):

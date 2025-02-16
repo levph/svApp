@@ -9,6 +9,7 @@ class StatusDatabase:
         self.by_ip: dict[str, Status] = dict()
         self.by_node_id: dict[int, Status] = dict()
         self.by_name: dict[str, Status] = dict()
+        self._offline_devices: dict[id, float] = dict()
 
     def __iadd__(self, other: Status | list[Status]) -> "StatusDatabase":
         """
@@ -81,10 +82,14 @@ class StatusDatabase:
 
         raise ValueError(f'item is expcted to be node_id (int), IP address (str) or a name (str). Given = {type(item)}')
 
+    def delete_expired(self, timestamp: float):
+        expired_ids = [device_id for device_id, disc_time in self._offline_devices.items() if timestamp-disc_time
+        pass
+
 
 if __name__ == '__main__':
     db = StatusDatabase()
     statusim = [Status(ip="aifa", id=123, status=[1], name="lev", percent='-1', is_online=True),
                 Status(ip="aifa1", id=1234, status=[1], name="lev1", percent='-1', is_online=True)]
-    db += statusim
+    # db += statusim
     lev = 1
