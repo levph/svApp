@@ -33,6 +33,7 @@ class RadioManager:
         self.credentials: Optional[Credentials] = None
         self.net_interval: int = 2
         self.known_batteries: dict[str, str] = {}
+        self._hidden_flag: bool = False
 
     @property
     def hidden_devices(self) -> HiddenDevices:
@@ -123,6 +124,7 @@ class RadioManager:
             raise HTTPException(status_code=404, detail=f"Node {device_id} doesn't exist")
 
         self._hidden_devices.append(device_id)
+        self._hidden_flag = True
         return
 
     def unhide(self, device_ids: list[int]) -> None:
@@ -133,6 +135,7 @@ class RadioManager:
         :return:
         """
         self._hidden_devices = [device for device in self._hidden_devices if device not in device_ids]
+        self._hidden_flag = True
 
     def save_topology(self, topology: Topology):
         """
@@ -247,6 +250,8 @@ class RadioManager:
             # Get current state
             known_batteries = self.known_batteries.copy()
             current_statusim = self.statusim.copy()
+            net_change_flag = self._hidden_flag
+            self._hidden_flag = False
             timestamp = time.time()
 
             # Discover current network topology
@@ -254,7 +259,7 @@ class RadioManager:
             current_ip_mapping = {node: ip for node, ip in zip(node_list, ip_list)}
 
             # remove expired ips, if any
-            net_change_flag = self._offline_devices.delete_expired(timestamp)
+            net_change_flag |= self._offline_devices.delete_expired(timestamp)
 
             # check if there was change in iplist
             if set(self.ip_list) != set(ip_list):
