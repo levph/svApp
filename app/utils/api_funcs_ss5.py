@@ -258,7 +258,7 @@ class RadioManager:
             ip_list, node_list = self.list_devices(self.radio_ip, self.version)
             current_ip_mapping = {node: ip for node, ip in zip(node_list, ip_list)}
 
-            # remove expired ips, if any
+            # remove expired ips, if any, update change flag accordingly
             net_change_flag |= self._offline_devices.delete_expired(timestamp)
 
             # check if there was change in iplist
