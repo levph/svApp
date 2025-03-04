@@ -23,11 +23,15 @@ class NewLabel(BaseModel):
 class PttData(BaseModel):
     # {"num_groups": 4,
     #  "ips": ["172.20.241.202", "172.20.238.213"],
-    #  "statuses": [[1, 1, 0, 0], [1, 0, 1, 0]]
+    #  "status": [[1, 1, 0, 0], [1, 0, 1, 0]]
     #  }
     num_groups: int
     ips: list[str]
     statuses: list[list[int]]
+
+
+class PttDataSingle(BaseModel):
+    status: list[int]
 
 
 class Interval(BaseModel):
@@ -79,6 +83,7 @@ class Status(BaseModel):
     name: str
     percent: str = "-1"
     is_online: bool
+    disconnect_time: float = -1.0
 
 
 class HiddenDevices(BaseModel):
@@ -149,8 +154,8 @@ class Setting(BaseModel):
     value: str
 
 
-class OfflineIp(BaseModel):
-    status: Status
+class OfflineDevice(BaseModel):
+    id: int
     time: float
 
 

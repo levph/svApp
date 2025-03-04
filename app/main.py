@@ -135,7 +135,7 @@ def set_label(node: NodeID):
     This method sets label for given device id
     :return:
     """
-    return radio_manager.set_label(node)
+    radio_manager.set_label(node)
 
 
 @app.get("/net-data")
@@ -203,7 +203,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/set-ptt-groups")
 def set_ptt_group(ptt_data: PttData):
-    return radio_manager.set_ptt_groups(ptt_data)
+    radio_manager.set_ptt_groups(ptt_data)
 
 
 @app.get("/get-camera-links")

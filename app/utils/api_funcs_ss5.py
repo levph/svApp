@@ -11,6 +11,7 @@ from utils.fa_models import *
 #     NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, OfflineIp, Topology, NodePos
 from utils.send_commands import SessionManager
 from utils.offline_manager import OfflineDevicesManager
+from utils.radio_status_database import StatusDatabase
 
 
 class RadioManager:
@@ -27,6 +28,7 @@ class RadioManager:
         self.node_list: list[int] = []
         self.ip_list: list[str] = []
         self._node_names: dict[int, str] = {}
+        self._statusim: StatusDatabase = StatusDatabase()
         self.statusim: list[Status] = []
         self.version: int = self.default_version()
         self.cam_data = None
@@ -93,7 +95,7 @@ class RadioManager:
         self.radio_ip = ip
         self._node_names = nodes_names
         self.node_list = node_list
-        self.statusim = statusim
+        self._statusim += statusim
         self.ip_list = ip_list
         self.version = version
         self.credentials = creds
@@ -107,7 +109,7 @@ class RadioManager:
         self.node_list = []
         self.ip_list = []
         self._node_names = {}
-        self.statusim = []
+        self._statusim = None
         self.version = 5  # default
         self.cam_data = None
         self.credentials = None
@@ -185,7 +187,7 @@ class RadioManager:
         """
         return GUI_URL.format(self.radio_ip)
 
-    def set_label(self, node: NodeID) -> set[str]:
+    def set_label(self, node: NodeID) -> None:
         """
         Change label of single device in current radio
         :param node:
@@ -193,13 +195,12 @@ class RadioManager:
         """
         res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
 
+        if not res:
+            raise HTTPException(status_code=404, detail=f"Node {node.id} doesn't exist")
+
         # update name in all variables
         self._node_names[node.id] = node.label
-        for status in self.statusim:
-            if status.id == node.id:
-                status.name = node.label
-
-        return {"Success"} if res else {"Fail"}
+        self._statusim[node.id].name = node.label
 
     async def run_task(self, websocket: WebSocket, func, interval: int):
         """Run the specified function at a given interval and send results via WebSocket."""
@@ -249,7 +250,7 @@ class RadioManager:
         try:
             # Get current state
             known_batteries = self.known_batteries.copy()
-            current_statusim = self.statusim.copy()
+            current_statusim = self._statusim
             net_change_flag = self._hidden_flag
             self._hidden_flag = False
             timestamp = time.time()
@@ -281,7 +282,7 @@ class RadioManager:
         except Exception as e:
             raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
 
-    def _process_network_changes(self, current_ip_mapping: dict[int, str], current_statusim: list[Status],
+    def _process_network_changes(self, current_ip_mapping: dict[int, str], current_statusim: StatusDatabase,
                                  timestamp: time.time, known_batteries: dict) -> tuple[list[Status], dict]:
         """
         Processes changes in network topology, handling newly connected, reconnected and disconnected devices.
@@ -295,8 +296,8 @@ class RadioManager:
         new_ip_mapping = {iid: ip for iid, ip in current_ip_mapping.items() if ip not in self.ip_list}
 
         # add ips that disconnected now, change their online status to false
-        current_statusim = self._offline_devices.add_offline_devices(current_statusim,
-                                                                     list(current_ip_mapping.values()), timestamp)
+        self._offline_devices.add_offline_devices(current_statusim,
+                                                  list(current_ip_mapping.values()), timestamp)
 
         if new_ip_mapping:
             back_online, new_ip_mapping = self._offline_devices.pop_reconnected(new_ip_mapping)
@@ -318,8 +319,8 @@ class RadioManager:
         :param known_batteries:
         :return:
         """
-        # add offline statuses to device list
-        device_list = current_statusim + [offline.status for offline in self._offline_devices.offline_devices]
+        # add offline status to device list
+        device_list = current_statusim + [offline_status for offline_status in self._offline_devices.radios]
 
         # TODO: handle devices better, known_batteries is ugly
         for status in device_list:
@@ -382,24 +383,32 @@ class RadioManager:
         self.known_batteries.update(ips_batteries)
         return SocketMsg(type="battery", data=ips_batteries)
 
-    def set_ptt_groups(self, ptt_data):
+    def set_ptt_groups(self, ptt_data: PttData):
         """
         Change ptt group settings of multiple devices
         :param ptt_data:
         :return:
         """
         try:
-            nodes = [self.node_list[self.ip_list.index(ip)] for ip in ptt_data.ips]
-            self.set_ptt_groups_impl(nodelist=nodes, num_groups=ptt_data.num_groups, statuses=ptt_data.statuses)
+            nodes = [self._statusim[ip].id for ip in ptt_data.ips]
+            self.set_ptt_groups_impl(nodelist=nodes, num_groups=ptt_data.num_groups, statuses=ptt_data.status)
 
-            # update global statusim on success
-            for status in self.statusim:
-                if status.ip in ptt_data.ips:
-                    status.status = ptt_data.statuses[ptt_data.ips.index(status.ip)]
+            for ip, status in zip(ptt_data.ips, ptt_data.statuses):
+                self._statusim[ip].status = status
 
-            return {"message": "ptt group settings set successfully"}
         except Exception as e:
             raise ErrorResponse(msg=f"Error in setting PTT groups: {str(e)}")
+
+    def set_ptt_group_master(self, ptt_data: PttDataSingle):
+
+        ptt_settings = self._ptt_data_format([ptt_data.status])[0]
+        self.session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self.radio_ip,
+                                              params=[ptt_settings])
+
+        self.session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self.radio_ip,
+                                              params=[["ptt_active_mcast_group"]])
+
+        self._statusim[self.radio_ip].status = ptt_data.status
 
     async def get_camera_links(self):
         """
@@ -418,13 +427,11 @@ class RadioManager:
         :param radio_ip:
         :return:
         """
-        # TODO: check message output
         labels = self.session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
         ids_labels = [(int(k), v) for k, v in labels.items()]
         if not ids_labels:
             return {}
 
-        # TODO: test that
         node_names = dict(ids_labels)
 
         return node_names
@@ -575,7 +582,6 @@ class RadioManager:
         global_max_group = 0
         # parser for silvus ptt group!
         for radio_index, radio_ip in enumerate(ips):
-            # TODO: check output, if one device has different password we're fucked:)
             ptt_groups = self.session_manager.send_commands_ip(methods=["ptt_active_mcast_group"], radio_ip=radio_ip,
                                                                params=[[]],
                                                                param_flag=1)[0]
@@ -607,22 +613,10 @@ class RadioManager:
 
         return res
 
-    def set_ptt_groups_impl(self, nodelist: list[int], num_groups: int, statuses):
-        """
-        Helper to set_ptt_group method. See definition in caller
-        :param nodelist:
-        :param num_groups:
-        :param statuses:
-        :return:
-        """
-        group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
-        methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle"]
-        params = group_ips + ["ptt_mcast_group"]
-        self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params, bcast=1,
-                                              nodelist=nodelist)
-
+    @staticmethod
+    def _ptt_data_format(status_list: list[list[int]]) -> list:
         ptt_settings = []
-        for status in statuses:
+        for status in status_list:
             listen = []
             talk = []
             monitor = []
@@ -641,6 +635,24 @@ class RadioManager:
             arr = [listen, talk, monitor] if monitor else [listen, talk]
             ptt_str = '_'.join(arr)
             ptt_settings.append([ptt_str])
+
+        return ptt_settings
+
+    def set_ptt_groups_impl(self, nodelist: list[int], num_groups: int, statuses):
+        """
+        Helper to set_ptt_group method. See definition in caller
+        :param nodelist:
+        :param num_groups:
+        :param statuses:
+        :return:
+        """
+        group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
+        methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle"]
+        params = group_ips + ["ptt_mcast_group"]
+        self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params, bcast=1,
+                                              nodelist=nodelist)
+
+        ptt_settings = self._ptt_data_format(statuses)
 
         for ii in range(len(nodelist)):
             self.session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self.radio_ip,
@@ -719,10 +731,8 @@ class RadioManager:
         :param radio_ip:
         :return:
         """
-        # TODO: check if i need to take response[0] or like this
         response = self.session_manager.send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
-
         return 4 if "v4" in response else 5
 
     def _statuses_by_id(self, ids: list[int]):
-        return [status for status in self.statusim if status.id in ids]
+        return [self._statusim[node_id].status for node_id in ids]

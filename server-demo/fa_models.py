@@ -46,7 +46,7 @@ class NewLabel(BaseModel):
 class PttData(BaseModel):
     # query = {'num_groups': 4,
     #          'ips': ['172.20.240.107'],
-    #          'statuses': [[1, 1, 0, 0]]
+    #          'status': [[1, 1, 0, 0]]
     #          }
     num_groups: int
     ips: list[str]

@@ -1,9 +1,10 @@
 import time
 
-from utils.fa_models import OfflineIp, Status
+from utils.fa_models import OfflineDevice, Status
+from utils.radio_status_database import StatusDatabase
 
 
-class OfflineDevicesManager:
+class OfflineDevicesManager(StatusDatabase):
     """
     Manages the lifecycle of offline network devices, including tracking their status,
     handling reconnections, and managing device timeouts.
@@ -28,7 +29,7 @@ class OfflineDevicesManager:
         Returns:
             int: Default timeout in seconds (20)
         """
-        return 20
+        return 3
 
     # Special Methods
     def __init__(self):
@@ -36,42 +37,9 @@ class OfflineDevicesManager:
         Initializes a new OfflineDevicesManager with default settings.
         Sets up empty offline devices list and default timeout value.
         """
-        self._offline_devices: list[OfflineIp] = []
-        self._timeout = self.default_timeout()
-
-    def __iadd__(self, other: OfflineIp) -> 'OfflineDevicesManager':
-        """
-        Implements the += operator to add a new offline device.
-
-        Args:
-            other (OfflineIp): The offline device to add
-
-        Returns:
-            OfflineDevicesManager: Self reference for method chaining
-        """
-        self._offline_devices.append(other)
-        return self
-
-    # Properties
-    @property
-    def offline_devices(self) -> list[OfflineIp]:
-        """
-        List of currently tracked offline devices.
-
-        Returns:
-            List[OfflineIp]: Current offline devices
-        """
-        return self._offline_devices
-
-    @offline_devices.setter
-    def offline_devices(self, devices: list[OfflineIp]) -> None:
-        """
-        Updates the list of offline devices.
-
-        Args:
-            devices (List[OfflineIp]): New list of offline devices
-        """
-        self._offline_devices = devices
+        super().__init__()
+        self._timeout: int = self.default_timeout()
+        self._disconnect_times: dict[int, float] = {}
 
     # Public Methods
     def delete_expired(self, timestamp: float) -> bool:
@@ -84,19 +52,21 @@ class OfflineDevicesManager:
         Returns:
             bool: True if any devices were removed, False otherwise
         """
-        prev_len = len(self._offline_devices)
-        self._offline_devices = [
-            offline for offline in self._offline_devices
-            if timestamp - offline.time < self._timeout
-        ]
-        return prev_len != len(self._offline_devices)
+        prev_len = len(self.nodes_id)
+        expired_radios = [radio for radio in self.radios if
+                          timestamp - radio.disconnect_time > self._timeout]
+
+        for expired in expired_radios:
+            self.remove_radio(expired)
+
+        return prev_len != len(self.nodes_id)
 
     def add_offline_devices(
             self,
-            current_devices_status: list[Status],
-            ip_list: list[str],
+            current_statuses: StatusDatabase,
+            new_ip_list: list[str],
             timestamp: float
-    ) -> list[Status]:
+    ) -> None:
         """
         Processes newly disconnected devices and adds them to the offline list.
 
@@ -107,26 +77,17 @@ class OfflineDevicesManager:
         4. Updates the current devices status list
 
         Args:
-            current_devices_status (List[Status]): List of current device statuses
-            ip_list (List[str]): List of currently active IP addresses
+            current_statuses (List[Status]): List of current device status (before update)
+            new_ip_list (List[str]): List of currently active IP addresses
             timestamp (float): Current timestamp
 
-        Returns:
-            List[Status]: Updated list of current device statuses
         """
-        # Create a new list instead of modifying while iterating
-        remaining_devices = []
 
-        for status in current_devices_status:
-            if status.ip not in ip_list:
-                setattr(status, 'is_online', False)
-                self._offline_devices.append(
-                    OfflineIp(status=status, time=timestamp)
-                )
-            else:
-                remaining_devices.append(status)
-
-        return remaining_devices
+        for radio in current_statuses.radios:
+            if radio.ip not in new_ip_list:
+                radio.is_online = False
+                self._add_offline(radio, timestamp)
+                current_statuses.remove_radio(radio)
 
     def pop_reconnected(
             self,
@@ -149,18 +110,41 @@ class OfflineDevicesManager:
                 - List of devices that have reconnected
                 - Updated IP mapping with processed devices removed
         """
-        back_online = []
-        processed_offline = []
 
-        for offline in self._offline_devices:
-            if offline.status.id in new_ips_map:
-                setattr(offline.status, 'is_online', True)
-                back_online.append(offline.status)
-                del new_ips_map[offline.status.id]
-                processed_offline.append(offline)
+        back_online = [radio for radio in self.radios if radio.id in new_ips_map]
+        for back_online_radio in back_online:
+            radio = self.remove_radio(back_online_radio)
 
-        # Remove processed devices after iteration
-        for offline in processed_offline:
-            self._offline_devices.remove(offline)
+            self._recover_radio(radio)
+            new_ips_map.pop(radio.id)
 
         return back_online, new_ips_map
+
+    # Private
+    def _add_offline(self, radio: Status, timestamp) -> None:
+        radio.disconnect_time = timestamp
+        super().add_radio(radio)
+
+    @staticmethod
+    def _recover_radio(radio: Status):
+        radio.is_online = True
+        radio.disconnect_time = -1.0
+
+# if __name__ == '__main__':
+#     db = StatusDatabase()
+#     statusim = [Status(ip="172.20.238.213", id=123, status=[1], name="lev", percent='-1', is_online=True),
+#                 Status(ip="172.20.241.202", id=1234, status=[1], name="lev1", percent='-1', is_online=True)]
+#     db += statusim
+#
+#     offline_db = OfflineDevicesManager()
+#     offline_db.add_offline_devices(db, ["172.20.241.202"], time.time())
+#
+#     # time.sleep(2)
+#     # timestamp1 = time.time()
+#     # offline_db.delete_expired(timestamp1)
+#
+#     new_ips_map = {statusim[0].id: statusim[0].ip}
+#
+#     back_online, tbd = offline_db.pop_reconnected(new_ips_map)
+#     db += back_online
+#     lev = 1
