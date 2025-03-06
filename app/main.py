@@ -206,6 +206,16 @@ def set_ptt_group(ptt_data: PttData):
     radio_manager.set_ptt_groups(ptt_data)
 
 
+@app.post("/set-ptt-master")
+def set_ptt_master(ptt_data: PttDataSingle):
+    """
+    This endpoint sets ptt group data for master radio
+    :param ptt_data:
+    :return:
+    """
+    radio_manager.set_ptt_group_master(ptt_data)
+
+
 @app.get("/get-camera-links")
 async def get_camera():
     """

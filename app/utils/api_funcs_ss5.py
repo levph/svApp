@@ -1,14 +1,11 @@
 import asyncio
 import json
 import time
-from typing import Optional
 
 import requests
 from fastapi import WebSocket, WebSocketDisconnect, HTTPException
 from requests import Timeout
 from utils.fa_models import *
-# from utils.fa_models import Credentials, IpCredentials, ErrorResponse, Status, LogInResponse, NodeID, \
-#     NetDataMsg, SocketMsg, Interval, BasicSettings, CamStream, Camera, OfflineIp, Topology, NodePos
 from utils.send_commands import SessionManager
 from utils.offline_manager import OfflineDevicesManager
 from utils.radio_status_database import StatusDatabase
@@ -20,21 +17,23 @@ class RadioManager:
     def default_version(cls) -> int:
         return 5
 
+    @classmethod
+    def default_net_interval(cls) -> int:
+        return 2
+
     def __init__(self):
-        self.radio_ip: Optional[str] = None
-        self.session_manager: SessionManager = SessionManager()
+        self._radio_ip: Optional[str] = None
+        self._session_manager: SessionManager = SessionManager()
         self._offline_devices: OfflineDevicesManager = OfflineDevicesManager()
         self._hidden_devices: list[int] = []
-        self.node_list: list[int] = []
-        self.ip_list: list[str] = []
+        self._node_list: list[int] = []
         self._node_names: dict[int, str] = {}
         self._statusim: StatusDatabase = StatusDatabase()
-        self.statusim: list[Status] = []
-        self.version: int = self.default_version()
+        self._version: int = self.default_version()
         self.cam_data = None
-        self.credentials: Optional[Credentials] = None
-        self.net_interval: int = 2
-        self.known_batteries: dict[str, str] = {}
+        self._credentials: Optional[Credentials] = None
+        self._net_interval: int = self.default_net_interval()
+        self._known_batteries: dict[str, str] = {}
         self._hidden_flag: bool = False
 
     @property
@@ -47,26 +46,20 @@ class RadioManager:
         """
         return HiddenDevices(device_list=self._statuses_by_id(self._hidden_devices))
 
-    def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
-        """
-        Attempt login to device,
-        if succesfull, get all initial data from network
-        :param ip_creds:
-        :return:
-        """
-        # extract ip from input
-        ip = ip_creds.radio_ip
+    def _attempt_log_in(self, ip: str, username: str, password: str) -> Credentials:
+        # attempt login if credentials were supplied
         creds = Credentials()
 
-        # attempt login if credentials were supplied
-        if ip_creds.username and ip_creds.password:
-            creds.username = ip_creds.username
-            creds.password = ip_creds.password
-            if not self.session_manager.log_in(radio_ip=ip, creds=creds):
+        if username and password:
+            creds.username = username
+            creds.password = password
+            if not self._session_manager.log_in(radio_ip=ip, creds=creds):
                 raise ErrorResponse(msg="Incorrect Credentials", status_code=401)
             # global credentials in session_manager are set now
 
-        # gather initial data
+        return creds
+
+    def _init_network_params(self, ip):
         try:
             version = self.get_version(ip)
 
@@ -75,7 +68,7 @@ class RadioManager:
             # names are not dynamic, saved in device flash
             nodes_names = self.get_radio_label(ip)
 
-            self.session_manager.set_version(version)
+            self._session_manager.set_version(version)
 
             statusim = self.get_ptt_groups(ip_list, node_list, nodes_names)
         except (Timeout, TimeoutError):
@@ -92,29 +85,42 @@ class RadioManager:
             else:
                 raise ErrorResponse(msg=f"Unknown Error: {e}")
 
-        self.radio_ip = ip
+        # set members if successful
         self._node_names = nodes_names
-        self.node_list = node_list
         self._statusim += statusim
-        self.ip_list = ip_list
-        self.version = version
-        self.credentials = creds
+        self._version = version
+
+    def log_in(self, ip_creds: IpCredentials) -> LogInResponse | ErrorResponse:
+        """
+        Attempt login to device,
+        if successful, get all initial data from network
+        :param ip_creds:
+        :return:
+        """
+        # extract ip from input
+        ip = ip_creds.radio_ip
+
+        creds = self._attempt_log_in(ip, ip_creds.username, ip_creds.password)
+
+        # gather initial data
+        self._init_network_params(ip)
+
+        self._radio_ip = ip
+        self._credentials = creds
 
         return LogInResponse(type="Success", msg={"ip": ip, "is_protected": 0})
 
     def log_out(self) -> None:
 
-        self.radio_ip: None
-        self.session_manager = SessionManager()
-        self.node_list = []
-        self.ip_list = []
+        self._radio_ip: None
+        self._session_manager = SessionManager()
         self._node_names = {}
         self._statusim = None
-        self.version = 5  # default
+        self._version = self.default_version()
         self.cam_data = None
-        self.credentials = None
-        self.net_interval = 2
-        self.known_batteries = {}
+        self._credentials = None
+        self._net_interval = self.default_net_interval()
+        self._known_batteries = {}
 
     def hide(self, device_id: int) -> None:
         """
@@ -122,7 +128,7 @@ class RadioManager:
         :param device_id:
         :return:
         """
-        if device_id not in self.node_list:
+        if device_id not in self._statusim.nodes_id:
             raise HTTPException(status_code=404, detail=f"Node {device_id} doesn't exist")
 
         self._hidden_devices.append(device_id)
@@ -149,7 +155,8 @@ class RadioManager:
         for node in topology.device_list:
             node_db[str(node.id)] = {"pos": {"x": node.pos[0], "y": node.pos[1]}}
 
-        res = self.session_manager.send_topology(self.radio_ip, action="save", node_db=node_db)
+        res = self._session_manager.send_topology(self._radio_ip, action="save", node_db=node_db)
+
         return {"Success"} if res else {"Fail"}
 
     def _format_topology(self, node_db: dict) -> Topology:
@@ -160,7 +167,7 @@ class RadioManager:
         """
         node_list = []
         for node_id, pos in node_db.items():
-            node_ip = self.node_id_to_ip([int(node_id)], self.version)[0]
+            node_ip = self.node_id_to_ip([int(node_id)], self._version)[0]
             node_list.append(NodePos(id=int(node_id), ip=node_ip, pos=(pos["pos"]["x"], pos["pos"]["y"])))
 
         return Topology(device_list=node_list)
@@ -171,7 +178,7 @@ class RadioManager:
         :return:
         """
         # load saved topology from connected device memory
-        res = self.session_manager.send_topology(self.radio_ip, action="load")
+        res = self._session_manager.send_topology(self._radio_ip, action="load")
 
         # if no topology was found
         if not res:
@@ -185,7 +192,7 @@ class RadioManager:
         Return URL of technician mode
         :return:
         """
-        return GUI_URL.format(self.radio_ip)
+        return GUI_URL.format(self._radio_ip)
 
     def set_label(self, node: NodeID) -> None:
         """
@@ -193,7 +200,7 @@ class RadioManager:
         :param node:
         :return:
         """
-        res = self.set_label_id(self.radio_ip, node.id, node.label, self.node_list)
+        res = self.set_label_id(node.id, node.label)
 
         if not res:
             raise HTTPException(status_code=404, detail=f"Node {node.id} doesn't exist")
@@ -207,7 +214,7 @@ class RadioManager:
         while True:
             result = await func()  # Run the function
             await websocket.send_text(result.json())  # Send the result over WebSocket
-            interval = interval if func == self.get_battery else self.net_interval
+            interval = interval if func == self.get_battery else self._net_interval
             await asyncio.sleep(interval)  # Wait for the next interval
 
     async def websocket_handler(self, websocket: WebSocket):
@@ -216,7 +223,7 @@ class RadioManager:
         try:
             # Create tasks for both functions running at different intervals
             task1 = asyncio.create_task(self.run_task(websocket, self.get_battery, 300))
-            task2 = asyncio.create_task(self.run_task(websocket, self.get_net_data, self.net_interval))
+            task2 = asyncio.create_task(self.run_task(websocket, self.get_net_data, self._net_interval))
 
             # Wait for tasks to complete (they will run indefinitely unless there's an error)
             await asyncio.gather(task1, task2)
@@ -249,41 +256,40 @@ class RadioManager:
         """
         try:
             # Get current state
-            known_batteries = self.known_batteries.copy()
-            current_statusim = self._statusim
+            prev_ips = self._statusim.ips
+            known_batteries = self._known_batteries.copy()
+            current_statusim = self._statusim  # TODO: Understand how to copy
             net_change_flag = self._hidden_flag
             self._hidden_flag = False
             timestamp = time.time()
 
             # Discover current network topology
-            ip_list, node_list = self.list_devices(self.radio_ip, self.version)
+            ip_list, node_list = self.list_devices(self._radio_ip, self._version)
             current_ip_mapping = {node: ip for node, ip in zip(node_list, ip_list)}
 
             # remove expired ips, if any, update change flag accordingly
             net_change_flag |= self._offline_devices.delete_expired(timestamp)
 
             # check if there was change in iplist
-            if set(self.ip_list) != set(ip_list):
+            if set(prev_ips) != set(ip_list):
                 net_change_flag = True
                 current_statusim, known_batteries = self._process_network_changes(current_ip_mapping, current_statusim,
-                                                                                  timestamp, known_batteries)
+                                                                                  timestamp, known_batteries, prev_ips)
 
             # get snrs between devices
-            snrs = self.net_status() if len(self.ip_list) > 1 else []
-            device_list = self._create_device_list(current_statusim, known_batteries)
+            snrs = self.net_status() if len(prev_ips) > 1 else []
+            device_list = self._create_device_list(current_statusim.radios, known_batteries)
             msg = NetDataMsg(device_list=device_list, snr_list=snrs)
 
-            self.statusim = current_statusim
-            self.known_batteries = known_batteries
-            self.ip_list = ip_list
-            self.node_list = node_list
+            self._statusim = current_statusim
+            self._known_batteries = known_batteries
 
             return SocketMsg(type="net_data", data=msg, has_changed=net_change_flag)
         except Exception as e:
             raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
 
     def _process_network_changes(self, current_ip_mapping: dict[int, str], current_statusim: StatusDatabase,
-                                 timestamp: time.time, known_batteries: dict) -> tuple[list[Status], dict]:
+                                 timestamp: time.time, known_batteries: dict, prev_ips: list[str]) -> tuple[StatusDatabase, dict]:
         """
         Processes changes in network topology, handling newly connected, reconnected and disconnected devices.
         :param current_ip_mapping:
@@ -293,7 +299,7 @@ class RadioManager:
         :return:
         """
         # extract new devices
-        new_ip_mapping = {iid: ip for iid, ip in current_ip_mapping.items() if ip not in self.ip_list}
+        new_ip_mapping = {iid: ip for iid, ip in current_ip_mapping.items() if ip not in prev_ips}
 
         # add ips that disconnected now, change their online status to false
         self._offline_devices.add_offline_devices(current_statusim,
@@ -338,10 +344,10 @@ class RadioManager:
         return [device for device in device_list if device.id not in self._hidden_devices]
 
     def get_interval(self) -> Interval:
-        return Interval(value=self.net_interval)
+        return Interval(value=self._net_interval)
 
     def change_interval(self, interval: Interval):
-        self.net_interval = int(interval.value)
+        self._net_interval = int(interval.value)
         return {"message": f"net-data interval set to {interval.value}"}
 
     async def basic_settings(self, settings: Optional[BasicSettings]):
@@ -359,18 +365,18 @@ class RadioManager:
         """
         if not device_id:
             raise ErrorResponse(msg="No id supplied")
-        elif device_id not in self.node_list:
+        elif device_id not in self._statusim.nodes_id:
             raise ErrorResponse(msg=f"{device_id} doesn't exist")
 
         # find corresponding ip
-        ip = self.ip_list[self.node_list.index(device_id)]
+        ip = self._statusim[device_id].ip
 
         # get battery percentage and format correctly
-        battery_percent = self.session_manager.send_commands_ip(["battery_percent"], ip, params=[[]])[0]
+        battery_percent = self._session_manager.send_commands_ip(["battery_percent"], ip, params=[[]])[0]
         battery_percent = str(round(float(battery_percent)))
 
         # update known batteries
-        self.known_batteries[ip] = battery_percent
+        self._known_batteries[ip] = battery_percent
 
         return {"percent": battery_percent}
 
@@ -380,7 +386,7 @@ class RadioManager:
         :return:
         """
         ips_batteries = self.get_batteries()
-        self.known_batteries.update(ips_batteries)
+        self._known_batteries.update(ips_batteries)
         return SocketMsg(type="battery", data=ips_batteries)
 
     def set_ptt_groups(self, ptt_data: PttData):
@@ -402,13 +408,13 @@ class RadioManager:
     def set_ptt_group_master(self, ptt_data: PttDataSingle):
 
         ptt_settings = self._ptt_data_format([ptt_data.status])[0]
-        self.session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self.radio_ip,
-                                              params=[ptt_settings])
+        self._session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self._radio_ip,
+                                               params=[ptt_settings])
 
-        self.session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self.radio_ip,
-                                              params=[["ptt_active_mcast_group"]])
+        self._session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self._radio_ip,
+                                               params=[["ptt_active_mcast_group"]])
 
-        self._statusim[self.radio_ip].status = ptt_data.status
+        self._statusim[self._radio_ip].status = ptt_data.status
 
     async def get_camera_links(self):
         """
@@ -427,7 +433,7 @@ class RadioManager:
         :param radio_ip:
         :return:
         """
-        labels = self.session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
+        labels = self._session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
         ids_labels = [(int(k), v) for k, v in labels.items()]
         if not ids_labels:
             return {}
@@ -472,7 +478,7 @@ class RadioManager:
         :return:
         """
         # TODO: check output
-        node_ids = self.session_manager.send_commands_ip(methods=["routing_tree"], radio_ip=s_ip, params=[[]])
+        node_ids = self._session_manager.send_commands_ip(methods=["routing_tree"], radio_ip=s_ip, params=[[]])
         ips = self.node_id_to_ip(node_ids, version)
         return ips, node_ids
 
@@ -482,22 +488,25 @@ class RadioManager:
         :return:
         """
         cameras = []
-        methods = [["read_client_list"] for _ in range(len(self.ip_list))]
-        params = [[[]] for _ in range(len(self.ip_list))]
+        num_devices = len(self._statusim.nodes_id)
+        network_ips = self._statusim.ips
+
+        methods = [["read_client_list"] for _ in range(num_devices)]
+        params = [[[]] for _ in range(num_devices)]
 
         # get list of IPs connected to each device
-        devices = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
-                                                          params=params)
+        devices = self._session_manager.read_from_multiple(radio_ips=network_ips, methods=methods,
+                                                           params=params)
 
-        if len(devices) != len(self.ip_list) or len(devices) != len(self.node_list):
+        if len(devices) != num_devices:
             return ErrorResponse("Problem with cameras. Try again")
 
-        for radio_devices, iip, iid in zip(devices, self.ip_list, self.node_list):
+        for radio_devices, network_radio in zip(devices, self._statusim.radios):
             if radio_devices == [-1]:
                 continue
 
             # filter ips already existing in network
-            filtered_devices = [device for device in radio_devices if device['ip'] not in self.ip_list]
+            filtered_devices = [device for device in radio_devices if device['ip'] not in network_ips]
             for device in filtered_devices:
                 ip = device['ip']
                 try:
@@ -510,17 +519,11 @@ class RadioManager:
 
                 main_stream = CamStream(uri=f"rtsp://{ip}:554/av0_0", audio=1)
                 sub_stream = CamStream(uri=f"rtsp://{ip}:554/av0_1", audio=1)
-                camera = Camera(ip=ip, device_ip=iip, device_id=iid, main_stream=main_stream, sub_stream=sub_stream)
+                camera = Camera(ip=ip, device_ip=network_radio.ip, device_id=network_radio.id, main_stream=main_stream,
+                                sub_stream=sub_stream)
                 cameras.append(camera)
 
         return cameras
-
-    @staticmethod
-    def _get_status_by_id(status_list: list[Status], iid: int) -> Status | None:
-        for status in status_list:
-            if status.id == iid:
-                return status
-        return None
 
     def net_status(self) -> list[dict]:
         """
@@ -551,8 +554,8 @@ class RadioManager:
             snr_res = [{"id1": k[0], "id2": k[1], "snr": v} for k, v in min_snr.items()]
             return snr_res
 
-        response = self.session_manager.send_commands_ip(methods=["streamscape_data"], radio_ip=self.radio_ip,
-                                                         params=[[]])
+        response = self._session_manager.send_commands_ip(methods=["streamscape_data"], radio_ip=self._radio_ip,
+                                                          params=[[]])
         return extract_snr(response)
 
     def get_batteries(self) -> dict[str, str]:
@@ -560,13 +563,14 @@ class RadioManager:
         Broadcast battery sampling to entire network and return current percentages
         :return:
         """
-        methods = [["battery_percent"] for _ in range(len(self.ip_list))]
-        params = [[[]] for _ in range(len(self.ip_list))]
+        num_devices = len(self._statusim.nodes_id)
+        methods = [["battery_percent"] for _ in range(num_devices)]
+        params = [[[]] for _ in range(num_devices)]
 
-        battery_percents = self.session_manager.read_from_multiple(radio_ips=self.ip_list, methods=methods,
-                                                                   params=params)
+        battery_percents = self._session_manager.read_from_multiple(radio_ips=self._statusim.ips, methods=methods,
+                                                                    params=params)
         result = {ip: str(round(float(percent[0]))) for ip, percent in
-                  zip(self.ip_list, battery_percents)}
+                  zip(self._statusim.ips, battery_percents)}
         return result
 
     def get_ptt_groups(self, ips: list[str], ids: list[int], names: dict[int, str]):
@@ -582,9 +586,9 @@ class RadioManager:
         global_max_group = 0
         # parser for silvus ptt group!
         for radio_index, radio_ip in enumerate(ips):
-            ptt_groups = self.session_manager.send_commands_ip(methods=["ptt_active_mcast_group"], radio_ip=radio_ip,
-                                                               params=[[]],
-                                                               param_flag=1)[0]
+            ptt_groups = self._session_manager.send_commands_ip(methods=["ptt_active_mcast_group"], radio_ip=radio_ip,
+                                                                params=[[]],
+                                                                param_flag=1)[0]
             states = ptt_groups.split('_')
             listen = states[0].split(',')
             talk = states[1].split(',')
@@ -608,8 +612,7 @@ class RadioManager:
                 name = names[iid]
             else:
                 name = ip
-            # TODO: check that:
-            res.append(Status(ip=ip, id=iid, status=status, name=name, percent="-1", is_online=True))
+            res.append(Status(ip=ip, id=iid, status=status, name=name, is_online=True))
 
         return res
 
@@ -649,22 +652,22 @@ class RadioManager:
         group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
         methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle"]
         params = group_ips + ["ptt_mcast_group"]
-        self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params, bcast=1,
-                                              nodelist=nodelist)
+        self._session_manager.send_commands_ip(methods=methods, radio_ip=self._radio_ip, params=params, bcast=1,
+                                               nodelist=nodelist)
 
         ptt_settings = self._ptt_data_format(statuses)
 
         for ii in range(len(nodelist)):
-            self.session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self.radio_ip,
-                                                  params=[ptt_settings[ii]], bcast=1, nodelist=[nodelist[ii]])
+            self._session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self._radio_ip,
+                                                   params=[ptt_settings[ii]], bcast=1, nodelist=[nodelist[ii]])
 
-        res = self.session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self.radio_ip,
-                                                    params=[["ptt_active_mcast_group"]], bcast=1,
-                                                    nodelist=nodelist)
+        res = self._session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self._radio_ip,
+                                                     params=[["ptt_active_mcast_group"]], bcast=1,
+                                                     nodelist=nodelist)
 
         return res
 
-    def set_label_id(self, radio_ip: str, node_id: int, label: str, nodelist: list[int]) -> bool:
+    def set_label_id(self, node_id: int, label: str) -> bool:
         """
         Weird implementation of changing device flash with new label -
         setting new label to device
@@ -674,10 +677,10 @@ class RadioManager:
         :param nodelist:
         :return:
         """
-        current_names = self.session_manager.send_commands_ip(methods=["node_labels"], radio_ip=radio_ip, params=[[]])
+        current_names = self._session_manager.send_commands_ip(methods=["node_labels"], radio_ip=self._radio_ip, params=[[]])
         current_names[str(node_id)] = label
         current_names = json.dumps(current_names)
-        res = self.session_manager.send_save_node_label(radio_ip, current_names, nodelist)
+        res = self._session_manager.send_save_node_label(self._radio_ip, current_names, self._statusim.nodes_id)
         return res[0][0]['result'] == ['']
 
     def get_basic_set(self) -> BasicSettings:
@@ -687,7 +690,7 @@ class RadioManager:
         """
         methods = ["freq", "bw", "power_dBm", "nw_name", "enable_max_power"]
         params = [[]] * 5
-        res = self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params)
+        res = self._session_manager.send_commands_ip(methods=methods, radio_ip=self._radio_ip, params=params)
 
         enable_max = int(res[4][0])
         power = "Enable Max Power" if enable_max else str(res[2][0])
@@ -718,10 +721,10 @@ class RadioManager:
         params = [[net_id], ["5000"], [power], [f, bw], [enable_max]] + [[name] for name in methods[:5]]
 
         if set_net:
-            response = self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params,
-                                                             bcast=1, nodelist=self.node_list)
+            response = self._session_manager.send_commands_ip(methods=methods, radio_ip=self._radio_ip, params=params,
+                                                              bcast=1, nodelist=self._statusim.nodes_id)
         else:
-            response = self.session_manager.send_commands_ip(methods=methods, radio_ip=self.radio_ip, params=params)
+            response = self._session_manager.send_commands_ip(methods=methods, radio_ip=self._radio_ip, params=params)
 
         return response
 
@@ -731,8 +734,8 @@ class RadioManager:
         :param radio_ip:
         :return:
         """
-        response = self.session_manager.send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
+        response = self._session_manager.send_commands_ip(methods=["build_tag"], radio_ip=radio_ip, params=[[]])[0]
         return 4 if "v4" in response else 5
 
     def _statuses_by_id(self, ids: list[int]):
-        return [self._statusim[node_id].status for node_id in ids]
+        return [self._statusim[node_id] for node_id in ids]

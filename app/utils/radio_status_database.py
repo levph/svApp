@@ -59,6 +59,7 @@ class StatusDatabase:
         self.by_name.pop(radio.name, None)
 
         return radio
+
     def remove_by_ip(self, ip: str) -> None:
         radio = self.by_ip[ip]
         self.remove_radio(radio)
@@ -82,8 +83,6 @@ class StatusDatabase:
             return self.by_name[item]
 
         raise ValueError(f'item is expcted to be node_id (int), IP address (str) or a name (str). Given = {type(item)}')
-
-
 
 
 if __name__ == '__main__':
