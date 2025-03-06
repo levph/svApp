@@ -289,7 +289,8 @@ class RadioManager:
             raise ErrorResponse(msg=f"Error in fetching net data: {str(e)}")
 
     def _process_network_changes(self, current_ip_mapping: dict[int, str], current_statusim: StatusDatabase,
-                                 timestamp: time.time, known_batteries: dict, prev_ips: list[str]) -> tuple[StatusDatabase, dict]:
+                                 timestamp: time.time, known_batteries: dict, prev_ips: list[str]) -> tuple[
+        StatusDatabase, dict]:
         """
         Processes changes in network topology, handling newly connected, reconnected and disconnected devices.
         :param current_ip_mapping:
@@ -397,7 +398,7 @@ class RadioManager:
         """
         try:
             nodes = [self._statusim[ip].id for ip in ptt_data.ips]
-            self.set_ptt_groups_impl(nodelist=nodes, num_groups=ptt_data.num_groups, statuses=ptt_data.status)
+            self.set_ptt_groups_impl(nodelist=nodes, num_groups=ptt_data.num_groups, statuses=ptt_data.statuses)
 
             for ip, status in zip(ptt_data.ips, ptt_data.statuses):
                 self._statusim[ip].status = status
@@ -407,12 +408,14 @@ class RadioManager:
 
     def set_ptt_group_master(self, ptt_data: PttDataSingle):
 
-        ptt_settings = self._ptt_data_format([ptt_data.status])[0]
-        self._session_manager.send_commands_ip(["ptt_active_mcast_group"], radio_ip=self._radio_ip,
-                                               params=[ptt_settings])
+        status = ptt_data.status
+        num_groups = len(status)
+        ptt_settings = self._ptt_data_format([status])[0]
+        group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
+        methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle", "ptt_active_mcast_group", "setenvlinsingle"]
+        params = group_ips + [["ptt_mcast_group"]] + [ptt_settings] + [["ptt_active_mcast_group"]]
 
-        self._session_manager.send_commands_ip(["setenvlinsingle"], radio_ip=self._radio_ip,
-                                               params=[["ptt_active_mcast_group"]])
+        self._session_manager.send_commands_ip(methods=methods, radio_ip=self._radio_ip, params=params)
 
         self._statusim[self._radio_ip].status = ptt_data.status
 
@@ -651,7 +654,7 @@ class RadioManager:
         """
         group_ips = [[str(i), f"239.0.0.{10 + i}"] for i in range(num_groups)]
         methods = ["ptt_mcast_group"] * len(group_ips) + ["setenvlinsingle"]
-        params = group_ips + ["ptt_mcast_group"]
+        params = group_ips + [["ptt_mcast_group"]]
         self._session_manager.send_commands_ip(methods=methods, radio_ip=self._radio_ip, params=params, bcast=1,
                                                nodelist=nodelist)
 
@@ -677,7 +680,8 @@ class RadioManager:
         :param nodelist:
         :return:
         """
-        current_names = self._session_manager.send_commands_ip(methods=["node_labels"], radio_ip=self._radio_ip, params=[[]])
+        current_names = self._session_manager.send_commands_ip(methods=["node_labels"], radio_ip=self._radio_ip,
+                                                               params=[[]])
         current_names[str(node_id)] = label
         current_names = json.dumps(current_names)
         res = self._session_manager.send_save_node_label(self._radio_ip, current_names, self._statusim.nodes_id)
